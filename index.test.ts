@@ -217,6 +217,14 @@ function stubEnv(key: string, value: string): void {
    });
 }
 
+function unsetEnv(key: string): void {
+   const original = process.env[key];
+   delete process.env[key];
+   onTestFinished(() => {
+      if (original !== undefined) process.env[key] = original;
+   });
+}
+
 async function setupTool(): Promise<RegisteredTool> {
    const { default: askUserExtension } = await import("./index");
    let registeredTool: RegisteredTool | undefined;
@@ -254,9 +262,10 @@ describe("ask_user", () => {
       expect((tool as any).executionMode).toBe("sequential");
    });
 
-   test("uses overlay mode by default", async () => {
+   test("uses inline mode by default", async () => {
+      unsetEnv("PI_ASK_USER_DISPLAY_MODE");
       const tool = await setupTool();
-      let capturedOptions: any;
+      let capturedOptions: unknown;
 
       await tool.execute(
          "tool-call-id",
@@ -269,7 +278,7 @@ describe("ask_user", () => {
          {
             hasUI: true,
             ui: {
-               custom: async (_factory: any, options: any) => {
+               custom: async (_factory: unknown, options: unknown) => {
                   capturedOptions = options;
                   return null;
                },
@@ -277,8 +286,7 @@ describe("ask_user", () => {
          },
       );
 
-      expect(capturedOptions.overlay).toBe(true);
-      expect(capturedOptions.overlayOptions.visible).toBeUndefined();
+      expect(capturedOptions).toBeUndefined();
    });
 
    test("uses non-overlay custom UI when displayMode is inline", async () => {
@@ -376,7 +384,7 @@ describe("ask_user", () => {
    });
 
    test("uses PI_ASK_USER_DISPLAY_MODE env var when call-level displayMode is omitted", async () => {
-      stubEnv("PI_ASK_USER_DISPLAY_MODE", "inline");
+      stubEnv("PI_ASK_USER_DISPLAY_MODE", "overlay");
       const tool = await setupTool();
       let capturedOptions: any;
 
@@ -399,13 +407,13 @@ describe("ask_user", () => {
          },
       );
 
-      expect(capturedOptions).toBeUndefined();
+      expect(capturedOptions.overlay).toBe(true);
    });
 
    test("normalizes PI_ASK_USER_DISPLAY_MODE before applying it", async () => {
-      stubEnv("PI_ASK_USER_DISPLAY_MODE", " INLINE ");
+      stubEnv("PI_ASK_USER_DISPLAY_MODE", " OVERLAY ");
       const tool = await setupTool();
-      let capturedOptions: unknown;
+      let capturedOptions: any;
 
       await tool.execute(
          "tool-call-id",
@@ -423,7 +431,7 @@ describe("ask_user", () => {
          },
       );
 
-      expect(capturedOptions).toBeUndefined();
+      expect(capturedOptions.overlay).toBe(true);
    });
 
    test("call-level displayMode overrides PI_ASK_USER_DISPLAY_MODE env var", async () => {
@@ -454,10 +462,10 @@ describe("ask_user", () => {
       expect(capturedOptions.overlay).toBe(true);
    });
 
-   test("ignores unrecognised PI_ASK_USER_DISPLAY_MODE value and falls back to overlay", async () => {
+   test("ignores unrecognised PI_ASK_USER_DISPLAY_MODE value and falls back to inline", async () => {
       stubEnv("PI_ASK_USER_DISPLAY_MODE", "fullscreen");
       const tool = await setupTool();
-      let capturedOptions: any;
+      let capturedOptions: unknown;
 
       await tool.execute(
          "tool-call-id",
@@ -470,7 +478,7 @@ describe("ask_user", () => {
          {
             hasUI: true,
             ui: {
-               custom: async (_factory: any, options: any) => {
+               custom: async (_factory: unknown, options: unknown) => {
                   capturedOptions = options;
                   return null;
                },
@@ -478,7 +486,7 @@ describe("ask_user", () => {
          },
       );
 
-      expect(capturedOptions.overlay).toBe(true);
+      expect(capturedOptions).toBeUndefined();
    });
 
    describe("overlay hide/show toggle (alt+o)", () => {
@@ -513,7 +521,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"] },
+            { question: "Q", options: ["A"], displayMode: "overlay" },
             undefined,
             undefined,
             {
@@ -571,7 +579,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"] },
+            { question: "Q", options: ["A"], displayMode: "overlay" },
             undefined,
             undefined,
             {
@@ -610,7 +618,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"] },
+            { question: "Q", options: ["A"], displayMode: "overlay" },
             undefined,
             undefined,
             {
@@ -641,7 +649,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"] },
+            { question: "Q", options: ["A"], displayMode: "overlay" },
             undefined,
             undefined,
             {
@@ -673,7 +681,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"], overlayToggleKey: "alt+h" },
+            { question: "Q", options: ["A"], displayMode: "overlay", overlayToggleKey: "alt+h" },
             undefined,
             undefined,
             {
@@ -711,7 +719,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"] },
+            { question: "Q", options: ["A"], displayMode: "overlay" },
             undefined,
             undefined,
             {
@@ -745,7 +753,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"], overlayToggleKey: "alt+x" },
+            { question: "Q", options: ["A"], displayMode: "overlay", overlayToggleKey: "alt+x" },
             undefined,
             undefined,
             {
@@ -777,7 +785,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"], overlayToggleKey: "off" },
+            { question: "Q", options: ["A"], displayMode: "overlay", overlayToggleKey: "off" },
             undefined,
             undefined,
             {
@@ -803,7 +811,7 @@ describe("ask_user", () => {
 
          await tool.execute(
             "tool-call-id",
-            { question: "Q", options: ["A"], overlayToggleKey: "++bad++" },
+            { question: "Q", options: ["A"], displayMode: "overlay", overlayToggleKey: "++bad++" },
             undefined,
             undefined,
             {
@@ -989,6 +997,7 @@ describe("ask_user", () => {
             question: "Which option should we use?",
             options: ["A", "B"],
             allowFreeform: true,
+            allowComment: false,
          },
          undefined,
          undefined,
@@ -1107,6 +1116,7 @@ describe("ask_user", () => {
             question: "Which option should we use?",
             options: ["Alpha", "Beta", "Gamma"],
             allowFreeform: false,
+            allowComment: false,
          },
          undefined,
          undefined,
@@ -1254,8 +1264,8 @@ describe("ask_user", () => {
       expect(result.details.cancelled).toBe(false);
    });
 
-   test("uses PI_ASK_USER_ALLOW_COMMENT when allowComment is omitted", async () => {
-      stubEnv("PI_ASK_USER_ALLOW_COMMENT", "true");
+   test("allows extra context by default", async () => {
+      unsetEnv("PI_ASK_USER_ALLOW_COMMENT");
       const tool = await setupTool();
 
       const result = await tool.execute(
@@ -1276,8 +1286,6 @@ describe("ask_user", () => {
                   );
                   component.handleInput("ctrl+g");
                   component.handleInput("enter");
-                  // Discriminator: with the env preference applied, the first
-                  // enter enters comment mode instead of resolving.
                   expect(resolved).toBeUndefined();
                   editorText = "Prefer the default browser everywhere.";
                   component.handleInput("enter");
@@ -1292,6 +1300,38 @@ describe("ask_user", () => {
          selections: ["Chrome"],
          comment: "Prefer the default browser everywhere.",
       });
+   });
+
+   test("PI_ASK_USER_ALLOW_COMMENT=false overrides the default", async () => {
+      stubEnv("PI_ASK_USER_ALLOW_COMMENT", "false");
+      const tool = await setupTool();
+
+      const result = await tool.execute(
+         "tool-call-id",
+         { question: "Which option should we use?", options: ["Chrome", "Firefox"] },
+         undefined,
+         undefined,
+         {
+            hasUI: true,
+            ui: {
+               custom: async (factory: AskComponentFactory) => {
+                  let resolved: unknown;
+                  const component = factory(
+                     { requestRender() { }, terminal: { rows: 24 } },
+                     createTheme(),
+                     createKeybindings(),
+                     (value) => { resolved = value; },
+                  );
+                  component.handleInput("ctrl+g");
+                  component.handleInput("enter");
+                  expect(resolved).not.toBeUndefined();
+                  return resolved ?? null;
+               },
+            },
+         },
+      );
+
+      expect(result.details.response).toEqual({ kind: "selection", selections: ["Chrome"] });
    });
 
    test("call-level allowComment false overrides PI_ASK_USER_ALLOW_COMMENT", async () => {
@@ -1376,6 +1416,7 @@ describe("ask_user", () => {
             question: "Which option should we use?",
             options: ["Alpha", "Beta"],
             allowFreeform: true,
+            allowComment: false,
          },
          undefined,
          undefined,
@@ -1424,6 +1465,8 @@ describe("ask_user", () => {
             question: "Which option should we use?",
             options: ["Alpha", "Beta"],
             allowFreeform: true,
+            allowComment: false,
+            displayMode: "overlay",
          },
          undefined,
          undefined,
@@ -1501,6 +1544,7 @@ describe("ask_user", () => {
             question: "Which option should we use?",
             options: ["Alpha", "Beta"],
             allowFreeform: true,
+            allowComment: false,
          },
          undefined,
          undefined,
@@ -1577,6 +1621,8 @@ describe("ask_user", () => {
             question: "This is a very long question. ".repeat(80),
             context: "Context detail. ".repeat(80),
             options: ["Alpha", "Beta"],
+            allowComment: false,
+            displayMode: "overlay",
          },
          undefined,
          undefined,
@@ -1624,6 +1670,8 @@ describe("ask_user", () => {
             question,
             context,
             options: ["Alpha", "Beta"],
+            allowComment: false,
+            displayMode: "overlay",
          },
          undefined,
          undefined,
@@ -1667,6 +1715,8 @@ describe("ask_user", () => {
             context: "Short context that should give way to the editor once freeform mode is active.",
             options: ["Alpha", "Beta"],
             allowFreeform: true,
+            allowComment: false,
+            displayMode: "overlay",
          },
          undefined,
          undefined,
@@ -1715,6 +1765,8 @@ describe("ask_user", () => {
             context: "Long overlay context so the prompt pane has scrollable overflow.",
             options: ["Alpha", "Beta"],
             allowFreeform: true,
+            allowComment: false,
+            displayMode: "overlay",
          },
          undefined,
          undefined,
@@ -2370,6 +2422,7 @@ describe("ask_user", () => {
                question: "Pick colors",
                options: ["Red", "Blue", "Green"],
                allowMultiple: true,
+               allowComment: false,
             },
             undefined,
             undefined,
