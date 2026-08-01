@@ -30,7 +30,11 @@ import {
    truncateToWidth,
    wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { renderSingleSelectRows, type QuestionOption } from "./single-select-layout";
+import {
+   getCenteredBlockWindow,
+   renderSingleSelectRows,
+   type QuestionOption,
+} from "./single-select-layout";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
@@ -380,6 +384,8 @@ const FREEFORM_SENTINEL = "\u270f\ufe0f Type custom response...";
 const COMMENT_TOGGLE_LABEL = "Add extra context after selection";
 const DEFAULT_OVERLAY_TOGGLE_KEY = "alt+o";
 const DEFAULT_COMMENT_TOGGLE_KEY = "ctrl+g";
+const CONTEXT_TOGGLE_KEYS = [Key.ctrl("e"), Key.ctrl("x"), Key.ctrl("y")];
+const INLINE_CONTEXT_MAX_ROWS = 3;
 
 // Vim-style aliases for navigating option lists. ctrl+j/k are safe in the
 // searchable single-select because they don't collide with fuzzy-search input.
@@ -463,6 +469,9 @@ class MultiSelectList implements Component {
    private selectedIndex = 0;
    private checked = new Set<number>();
    private commentEnabled = false;
+   // Inline mode retains its historical ten-item window. Overlay mode sets
+   // this to the compositor-provided row budget on every render.
+   private maxVisibleRows?: number;
    private cachedWidth?: number;
    private cachedLines?: string[];
 
@@ -488,6 +497,14 @@ class MultiSelectList implements Component {
 
    public isCommentEnabled(): boolean {
       return this.commentEnabled;
+   }
+
+   setMaxVisibleRows(rows: number): void {
+      const next = Math.max(1, Math.floor(rows));
+      if (next !== this.maxVisibleRows) {
+         this.maxVisibleRows = next;
+         this.invalidate();
+      }
    }
 
    invalidate(): void {
@@ -605,6 +622,87 @@ class MultiSelectList implements Component {
       }
    }
 
+   private wrapBlockText(
+      text: string,
+      width: number,
+      firstPrefix: string,
+      continuationPrefix: string,
+      style: (line: string) => string,
+      firstPrefixWidth = firstPrefix.length,
+   ): string[] {
+      const firstWidth = Math.max(1, width - firstPrefixWidth);
+      const wrapped = wrapTextWithAnsi(text, firstWidth);
+      const lines = wrapped.length > 0 ? wrapped : [""];
+      return lines.map((line, index) => truncateToWidth(
+         `${index === 0 ? firstPrefix : continuationPrefix}${style(line)}`,
+         width,
+         "",
+      ));
+   }
+
+   private buildItemBlocks(width: number): Array<{ itemIndex: number; lines: string[] }> {
+      const theme = this.theme;
+      const count = this.getItemCount();
+      const blocks: Array<{ itemIndex: number; lines: string[] }> = [];
+
+      for (let i = 0; i < count; i++) {
+         const isSelected = i === this.selectedIndex;
+         const prefix = isSelected ? theme.fg("accent", "→") : " ";
+         const lines: string[] = [];
+
+         if (this.isCommentToggleRow(i)) {
+            const checkbox = this.commentEnabled ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
+            const firstPrefix = `${prefix}   ${checkbox} `;
+            const continuationPrefix = " ".repeat(8);
+            const labelStyle = isSelected
+               ? (line: string) => theme.fg("accent", theme.bold(line))
+               : (line: string) => theme.fg("text", theme.bold(line));
+            lines.push(...this.wrapBlockText(COMMENT_TOGGLE_LABEL, width, firstPrefix, continuationPrefix, labelStyle, 8));
+         } else if (this.isFreeformRow(i)) {
+            const firstPrefix = `${prefix}   `;
+            const continuationPrefix = " ".repeat(4);
+            lines.push(...this.wrapBlockText(
+               "Type something. — Enter a custom response",
+               width,
+               firstPrefix,
+               continuationPrefix,
+               (line) => theme.fg("text", theme.bold(line)),
+               4,
+            ));
+         } else {
+            const option = this.options[i];
+            if (!option) continue;
+
+            const checkbox = this.checked.has(i) ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
+            const num = theme.fg("dim", `${i + 1}.`);
+            const titlePrefix = `${prefix} ${num} ${checkbox} `;
+            const titlePrefixWidth = 1 + 1 + (String(i + 1).length + 1) + 1 + 3 + 1;
+            const titleContinuation = " ".repeat(titlePrefixWidth);
+            const titleStyle = isSelected
+               ? (line: string) => theme.fg("accent", theme.bold(line))
+               : (line: string) => theme.fg("text", theme.bold(line));
+            lines.push(...this.wrapBlockText(option.title, width, titlePrefix, titleContinuation, titleStyle, titlePrefixWidth));
+
+            if (option.description) {
+               // Keep one content column even on pathological narrow widths;
+               // the indentation yields to the available width rather than
+               // forcing a ten-column minimum that truncates every chunk.
+               const indentWidth = Math.min(6, Math.max(0, width - 1));
+               const indent = " ".repeat(indentWidth);
+               const wrapWidth = Math.max(1, width - indentWidth);
+               const wrapped = wrapTextWithAnsi(option.description, wrapWidth);
+               for (const line of wrapped) {
+                  lines.push(truncateToWidth(indent + theme.fg("muted", line), width, ""));
+               }
+            }
+         }
+
+         blocks.push({ itemIndex: i, lines });
+      }
+
+      return blocks;
+   }
+
    render(width: number): string[] {
       if (this.cachedLines && this.cachedWidth === width) {
          return this.cachedLines;
@@ -612,69 +710,58 @@ class MultiSelectList implements Component {
 
       const theme = this.theme;
       const count = this.getItemCount();
-      const maxVisible = Math.min(count, 10);
-
       if (count === 0) {
          this.cachedLines = [theme.fg("warning", "No options")];
          this.cachedWidth = width;
          return this.cachedLines;
       }
 
-      const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(maxVisible / 2), count - maxVisible));
-      const endIndex = Math.min(startIndex + maxVisible, count);
+      this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, count - 1));
+      const blocks = this.buildItemBlocks(width);
+      const allRows = blocks.flatMap((block) => block.lines);
 
-      const lines: string[] = [];
-
-      for (let i = startIndex; i < endIndex; i++) {
-         const isSelected = i === this.selectedIndex;
-         const prefix = isSelected ? theme.fg("accent", "→") : " ";
-
-         if (this.isCommentToggleRow(i)) {
-            const checkbox = this.commentEnabled ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
-            const label = isSelected
-               ? theme.fg("accent", theme.bold(COMMENT_TOGGLE_LABEL))
-               : theme.fg("text", theme.bold(COMMENT_TOGGLE_LABEL));
-            lines.push(truncateToWidth(`${prefix}   ${checkbox} ${label}`, width, ""));
-            continue;
+      if (this.maxVisibleRows === undefined) {
+         const maxItems = Math.min(count, 10);
+         const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(maxItems / 2), count - maxItems));
+         const endIndex = Math.min(startIndex + maxItems, count);
+         const lines = blocks.slice(startIndex, endIndex).flatMap((block) => block.lines);
+         if (startIndex > 0 || endIndex < count) {
+            lines.push(theme.fg("dim", truncateToWidth(`  (${this.selectedIndex + 1}/${count})`, width, "")));
          }
-
-         if (this.isFreeformRow(i)) {
-            const label = theme.fg("text", theme.bold("Type something."));
-            const desc = theme.fg("muted", "Enter a custom response");
-            const line = `${prefix}   ${label} ${theme.fg("dim", "—")} ${desc}`;
-            lines.push(truncateToWidth(line, width, ""));
-            continue;
-         }
-
-         const option = this.options[i];
-         if (!option) continue;
-
-         const checkbox = this.checked.has(i) ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
-         const num = theme.fg("dim", `${i + 1}.`);
-         const title = isSelected
-            ? theme.fg("accent", theme.bold(option.title))
-            : theme.fg("text", theme.bold(option.title));
-
-         const firstLine = `${prefix} ${num} ${checkbox} ${title}`;
-         lines.push(truncateToWidth(firstLine, width, ""));
-
-         if (option.description) {
-            const indent = "      ";
-            const wrapWidth = Math.max(10, width - indent.length);
-            const wrapped = wrapTextWithAnsi(option.description, wrapWidth);
-            for (const w of wrapped) {
-               lines.push(truncateToWidth(indent + theme.fg("muted", w), width, ""));
-            }
-         }
+         this.cachedWidth = width;
+         this.cachedLines = lines;
+         return lines;
       }
 
-      if (startIndex > 0 || endIndex < count) {
-         lines.push(theme.fg("dim", truncateToWidth(`  (${this.selectedIndex + 1}/${count})`, width, "")));
+      const maxRows = Math.max(1, this.maxVisibleRows);
+      if (allRows.length <= maxRows) {
+         this.cachedWidth = width;
+         this.cachedLines = allRows;
+         return allRows;
       }
 
+      const indicator = theme.fg("dim", truncateToWidth(`  (${this.selectedIndex + 1}/${count})`, width, ""));
+      const window = getCenteredBlockWindow(blocks, this.selectedIndex, maxRows);
+      const availableRows = window.contentRows;
+      const selectedBlock = blocks[this.selectedIndex] ?? blocks[0];
+      if (!selectedBlock) return [];
+
+      // Keep a wrapped block whole whenever it fits. If the focused block is
+      // itself taller than the content budget, show its leading rows so focus
+      // remains identifiable, then keep the viewport's height stable.
+      let visibleRows = blocks.slice(window.startIndex, window.endIndex).flatMap((block) => block.lines);
+      if (selectedBlock.lines.length >= availableRows) {
+         visibleRows = visibleRows.slice(0, availableRows);
+      } else {
+         visibleRows.unshift(...Array.from({ length: window.paddingBeforeRows }, () => ""));
+         visibleRows.push(...Array.from({ length: window.paddingAfterRows }, () => ""));
+      }
+      while (visibleRows.length < availableRows) visibleRows.push("");
+      if (maxRows > 1) visibleRows.push(indicator);
+      visibleRows = visibleRows.slice(0, maxRows);
       this.cachedWidth = width;
-      this.cachedLines = lines;
-      return lines;
+      this.cachedLines = visibleRows;
+      return visibleRows;
    }
 }
 
@@ -826,10 +913,15 @@ class WrappedSingleSelectList implements Component {
    private buildListLines(width: number, filteredOptions: QuestionOption[], hideDescriptions = false): string[] {
       const lines: string[] = [];
       const count = this.getItemCount(filteredOptions);
+      // With one row available, the focused option/control is more useful than
+      // the filter header. Keep the header and search status at normal heights.
+      const compact = this.maxVisibleRows === 1;
       const searchValue = this.searchQuery ? this.theme.fg("text", this.searchQuery) : this.theme.fg("dim", "type to filter");
-      lines.push(truncateToWidth(`${this.theme.fg("accent", "Filter:")} ${searchValue}`, width, ""));
+      if (!compact) {
+         lines.push(truncateToWidth(`${this.theme.fg("accent", "Filter:")} ${searchValue}`, width, ""));
+      }
 
-      if (this.searchQuery && filteredOptions.length === 0) {
+      if (this.searchQuery && filteredOptions.length === 0 && (!compact || count === 0)) {
          lines.push(truncateToWidth(this.theme.fg("warning", "No matching options"), width, ""));
       }
 
@@ -1046,6 +1138,8 @@ class AskComponent extends Container {
    private promptScrollOffset = 0;
    private promptMaxScrollOffset = 0;
    private promptViewportRows = 0;
+   private contextIsCollapsible = false;
+   private contextExpanded = false;
 
    // Static layout components
    private titleText: Text;
@@ -1163,7 +1257,23 @@ class AskComponent extends Container {
          this.ensureSingleSelectList().setMaxVisibleRows(12);
       }
 
-      return this.frameRawLines(super.render(innerWidth), width, innerWidth);
+      return this.renderInlineLayout(width, innerWidth);
+   }
+
+   private renderInlineLayout(width: number, innerWidth: number): string[] {
+      const fullContextLines = this.buildFullContextLines(innerWidth);
+      this.setContextIsCollapsible(fullContextLines.length > INLINE_CONTEXT_MAX_ROWS);
+      if (this.contextExpanded) {
+         return this.renderOverlayLayout(width, innerWidth);
+      }
+      const bodyLines = [
+         ...this.buildPromptLines(innerWidth, fullContextLines),
+         "",
+         ...this.modeContainer.render(innerWidth),
+         "",
+         ...this.helpText.render(innerWidth),
+      ];
+      return this.frameBodyLines(bodyLines, width, innerWidth);
    }
 
    private getOverlayMaxRenderLines(): number {
@@ -1177,9 +1287,28 @@ class AskComponent extends Container {
       if (maxLines === 2) return [this.renderTopBorder(width), this.renderBottomBorder(width)];
 
       const bodyCapacity = Math.max(0, maxLines - 2);
-      const promptLines = this.buildPromptLines(innerWidth);
-      const helpFullLines = this.helpText.render(innerWidth);
-      const helpBudget = this.getOverlayHelpBudget(bodyCapacity, helpFullLines.length);
+      let helpFullLines = this.helpText.render(innerWidth);
+      const questionLines = this.buildQuestionLines(innerWidth);
+      const fullContextLines = this.buildFullContextLines(innerWidth);
+      const shouldCollapse = this.displayMode === "inline"
+         ? this.contextIsCollapsible
+         : this.mode === "select"
+            ? this.shouldCollapseContextForOverlay(
+               questionLines.length,
+               fullContextLines.length,
+               bodyCapacity,
+               helpFullLines.length,
+            )
+            : this.contextIsCollapsible;
+      this.setContextIsCollapsible(shouldCollapse);
+      helpFullLines = this.helpText.render(innerWidth);
+      const promptLines = this.buildPromptLines(innerWidth, fullContextLines);
+      // A select row is the actionable surface. On 5/6-row terminals the
+      // body can hold only one or two lines, so sacrifice help before leaving
+      // the user with no focused control at all.
+      const helpBudget = this.mode === "select" && bodyCapacity <= 2
+         ? 0
+         : this.getOverlayHelpBudget(bodyCapacity, helpFullLines.length);
       const contentRows = Math.max(0, bodyCapacity - helpBudget);
 
       let promptBudget = 0;
@@ -1189,24 +1318,34 @@ class AskComponent extends Container {
       if (this.mode === "select") {
          separatorRows = contentRows >= 4 ? 1 : 0;
          const promptAndModeRows = Math.max(0, contentRows - separatorRows);
-         promptBudget = promptAndModeRows;
 
-         if (promptAndModeRows > 0) {
-            const promptMinRows = promptLines.length > 0 ? 1 : 0;
-            const maximumModeRows = Math.max(0, promptAndModeRows - promptMinRows);
-            const modeMinRows = Math.min(this.getMinimumModeRows(), maximumModeRows);
-            modeBudget = Math.min(this.getPreferredModeRows(), maximumModeRows);
-            modeBudget = Math.max(modeMinRows, modeBudget);
-            promptBudget = promptAndModeRows - modeBudget;
+         if (bodyCapacity <= 2) {
+            // Keep at least one focused option/control visible. Prompt and
+            // help are expendable at this size and reappear at normal heights.
+            promptBudget = 0;
+            modeBudget = promptAndModeRows;
+            separatorRows = 0;
+         } else {
+            promptBudget = promptAndModeRows;
 
-            const usefulPromptRows = Math.min(
-               promptLines.length,
-               promptAndModeRows >= modeMinRows + 2 ? 2 : promptMinRows,
-            );
-            if (promptBudget < usefulPromptRows && modeBudget > modeMinRows) {
-               const shiftedRows = Math.min(usefulPromptRows - promptBudget, modeBudget - modeMinRows);
-               modeBudget -= shiftedRows;
-               promptBudget += shiftedRows;
+            if (promptAndModeRows > 0) {
+               const promptMinRows = promptLines.length > 0 ? 1 : 0;
+               const maximumModeRows = Math.max(0, promptAndModeRows - promptMinRows);
+               const modeMinRows = Math.min(this.getMinimumModeRows(), maximumModeRows);
+               modeBudget = Math.min(this.getPreferredModeRows(), maximumModeRows);
+               modeBudget = Math.max(modeMinRows, modeBudget);
+               promptBudget = promptAndModeRows - modeBudget;
+
+               const usefulPromptTarget = this.contextIsCollapsible && !this.contextExpanded ? 3 : 2;
+               const usefulPromptRows = Math.min(
+                  promptLines.length,
+                  promptAndModeRows >= modeMinRows + usefulPromptTarget ? usefulPromptTarget : promptMinRows,
+               );
+               if (promptBudget < usefulPromptRows && modeBudget > modeMinRows) {
+                  const shiftedRows = Math.min(usefulPromptRows - promptBudget, modeBudget - modeMinRows);
+                  modeBudget -= shiftedRows;
+                  promptBudget += shiftedRows;
+               }
             }
          }
       } else {
@@ -1236,12 +1375,63 @@ class AskComponent extends Container {
       return this.frameBodyLines(bodyLines.slice(0, bodyCapacity), width, innerWidth);
    }
 
-   private buildPromptLines(width: number): string[] {
+   private buildQuestionLines(width: number): string[] {
+      return this.questionText.render(width);
+   }
+
+   private buildFullContextLines(width: number): string[] {
+      if (!this.contextComponent) return [];
+      return this.contextComponent.render(width);
+   }
+
+   private setContextIsCollapsible(value: boolean): void {
+      if (this.contextIsCollapsible === value) return;
+      this.contextIsCollapsible = value;
+      if (!value) this.contextExpanded = false;
+      this.updateHelpText();
+   }
+
+   private getContextToggleKey(): string {
+      const reserved = new Set(
+         [this.shortcuts.overlayToggle, this.shortcuts.commentToggle]
+            .filter((shortcut) => !shortcut.disabled)
+            .map((shortcut) => shortcut.spec),
+      );
+      return CONTEXT_TOGGLE_KEYS.find((key) => !reserved.has(key)) ?? CONTEXT_TOGGLE_KEYS[0]!;
+   }
+
+   private buildContextDisplayLines(fullContextLines: string[], width: number): string[] {
+      if (fullContextLines.length === 0) return [];
+      if (!this.contextIsCollapsible || this.contextExpanded) return fullContextLines;
+      const label = `Context (${fullContextLines.length} lines) — ${this.getContextToggleKey()} expand`;
+      return [truncateToWidth(this.theme.fg("dim", label), width, "")];
+   }
+
+   private buildPromptLines(width: number, fullContextLines: string[]): string[] {
+      const questionLines = this.buildQuestionLines(width);
+      const contextLines = this.buildContextDisplayLines(fullContextLines, width);
+      const contextSeparator = this.contextIsCollapsible && !this.contextExpanded ? [] : [""];
       return [
-         ...this.titleText.render(width),
-         ...this.questionText.render(width),
-         ...(this.contextComponent ? ["", ...this.contextComponent.render(width)] : []),
+         ...questionLines,
+         ...(contextLines.length > 0 ? [...contextSeparator, ...contextLines] : []),
       ];
+   }
+
+   private shouldCollapseContextForOverlay(
+      questionRows: number,
+      contextRows: number,
+      bodyCapacity: number,
+      helpRows: number,
+   ): boolean {
+      if (contextRows === 0) return false;
+      const helpBudget = this.getOverlayHelpBudget(bodyCapacity, helpRows);
+      const contentRows = Math.max(0, bodyCapacity - helpBudget);
+      const separatorRows = contentRows >= 4 ? 1 : 0;
+      const promptCapacity = Math.max(
+         0,
+         contentRows - separatorRows - this.getMinimumModeRows(),
+      );
+      return questionRows + 1 + contextRows > promptCapacity;
    }
 
    private getOverlayHelpBudget(bodyCapacity: number, renderedHelpRows: number): number {
@@ -1253,13 +1443,13 @@ class AskComponent extends Container {
    private getMinimumModeRows(): number {
       if (this.mode === "freeform") return 5;
       if (this.mode === "comment") return 6;
-      return this.allowMultiple ? 3 : 4;
+      return 3;
    }
 
    private getPreferredModeRows(): number {
       if (this.mode === "freeform") return 10;
       if (this.mode === "comment") return 11;
-      return 8;
+      return 12;
    }
 
    private renderModeLines(width: number, budget: number): string[] {
@@ -1267,9 +1457,15 @@ class AskComponent extends Container {
       if (safeBudget <= 0) return [];
 
       if (this.mode === "select") {
-         if (!this.allowMultiple) {
-            this.ensureSingleSelectList().setMaxVisibleRows(Math.max(1, safeBudget));
+         if (this.allowMultiple) {
+            this.ensureMultiSelectList().setMaxVisibleRows(Math.max(1, safeBudget));
+            // Multi-select owns its row-budget-aware viewport so variable-height
+            // descriptions and the focused control are never clipped by a
+            // generic outer ellipsis.
+            return this.modeContainer.render(width);
          }
+
+         this.ensureSingleSelectList().setMaxVisibleRows(Math.max(1, safeBudget));
          return this.limitLines(this.modeContainer.render(width), safeBudget, width, true);
       }
 
@@ -1464,11 +1660,18 @@ class AskComponent extends Container {
       const overlayHint = this.displayMode === "overlay" && !this.shortcuts.overlayToggle.disabled
          ? literalHint(theme, this.shortcuts.overlayToggle.spec, "hide")
          : null;
-      const promptScrollHint = this.displayMode === "overlay"
+      const promptScrollHint = this.displayMode === "overlay" || this.contextExpanded
          ? literalHint(theme, "PgUp/PgDn", "prompt")
          : null;
       const commentHint = this.allowComment && !this.shortcuts.commentToggle.disabled
          ? literalHint(theme, this.shortcuts.commentToggle.spec, "toggle context")
+         : null;
+      const contextHint = this.contextIsCollapsible
+         ? literalHint(
+            theme,
+            this.getContextToggleKey(),
+            this.contextExpanded ? "collapse context" : "expand context",
+         )
          : null;
       if (this.mode === "freeform" || this.mode === "comment") {
          const alternateCancelKeys = this.keybindings
@@ -1487,12 +1690,16 @@ class AskComponent extends Container {
          return;
       }
 
+      const expandedContextHints = this.contextExpanded ? [contextHint, promptScrollHint] : [];
+      const standardContextHints = this.contextExpanded ? [] : [contextHint, promptScrollHint];
+
       if (this.allowMultiple) {
          const hints = [
+            ...expandedContextHints,
             literalHint(theme, "↑↓", "navigate"),
             literalHint(theme, "space", "toggle"),
             commentHint,
-            promptScrollHint,
+            ...standardContextHints,
             overlayHint,
             keybindingHint(theme, this.keybindings, "tui.select.confirm", "submit"),
             keybindingHint(theme, this.keybindings, "tui.select.cancel", "cancel"),
@@ -1505,9 +1712,10 @@ class AskComponent extends Container {
             .getKeys("tui.select.cancel")
             .filter((key) => key !== "escape" && key !== "esc");
          const hints = [
+            ...expandedContextHints,
             literalHint(theme, "type", "filter"),
             commentHint,
-            promptScrollHint,
+            ...standardContextHints,
             keybindingHint(theme, this.keybindings, "tui.editor.deleteCharBackward", "erase"),
             literalHint(theme, "↑↓", "navigate"),
             overlayHint,
@@ -1680,8 +1888,18 @@ class AskComponent extends Container {
       this.tui.requestRender();
    }
 
+   private toggleContext(): boolean {
+      if (this.mode !== "select" || !this.contextIsCollapsible) return false;
+      this.contextExpanded = !this.contextExpanded;
+      this.promptScrollOffset = 0;
+      this.invalidate();
+      this.tui.requestRender();
+      return true;
+   }
+
    private setPromptScrollOffset(nextOffset: number): boolean {
-      if (this.displayMode !== "overlay" || this.promptMaxScrollOffset <= 0) return false;
+      if (this.displayMode !== "overlay" && !this.contextExpanded) return false;
+      if (this.promptMaxScrollOffset <= 0) return false;
       const clamped = Math.max(0, Math.min(Math.floor(nextOffset), this.promptMaxScrollOffset));
       const changed = clamped !== this.promptScrollOffset;
       this.promptScrollOffset = clamped;
@@ -1689,7 +1907,8 @@ class AskComponent extends Container {
    }
 
    private handlePromptScrollInput(data: string): boolean {
-      if (this.displayMode !== "overlay" || this.promptMaxScrollOffset <= 0) return false;
+      if (this.displayMode !== "overlay" && !this.contextExpanded) return false;
+      if (this.promptMaxScrollOffset <= 0) return false;
       // Prompt scrolling is select-mode only: in freeform/comment modes the
       // editor owns PageUp/PageDown (tui.editor.pageUp/pageDown) for paging
       // through long input, so intercepting them here would steal editor keys.
@@ -1723,6 +1942,9 @@ class AskComponent extends Container {
    }
 
    handleInput(data: string): void {
+      if (matchesKey(data, this.getContextToggleKey() as any) && this.toggleContext()) {
+         return;
+      }
       if (this.handlePromptScrollInput(data)) {
          this.tui.requestRender();
          return;
@@ -1824,24 +2046,29 @@ export default function(pi: ExtensionAPI) {
       name: "ask_user",
       label: "Ask User",
       description:
-         "Ask the user a question with optional multiple-choice answers. Use this to gather information interactively. Ask exactly one focused question per call. Before calling, gather context with tools (read/web/ref) and pass a short summary via the context field.",
+         "Ask the user one focused question with optional choices. Keep it mobile-friendly: use a one-sentence question, optional decision-critical context, and concise options.",
       promptSnippet:
-         "Ask the user one focused question with optional multiple-choice answers to gather information interactively",
+         "Ask one concise, mobile-friendly question with optional multiple-choice answers",
       promptGuidelines: [
-         "Before calling ask_user, gather context with tools (read/web/ref) and pass a short summary via the context field.",
-         "Use ask_user when the user's intent is ambiguous, when a decision requires explicit user input, or when multiple valid options exist.",
-         "Ask exactly one focused question per ask_user call.",
-         "Do not combine multiple numbered, multipart, or unrelated questions into one ask_user prompt.",
+         "Before calling ask_user, gather evidence with tools, but include only decision-critical context in the prompt.",
+         "Keep ask_user mobile-friendly: target one question sentence and at most 120 characters; omit context when options are self-explanatory.",
+         "When context is needed, target at most 240 characters or three short lines. Do not restate the question or options in context.",
+         "Use 2-4 options where practical, with short titles and one-line descriptions.",
+         "Do not emit a long preamble immediately before ask_user.",
+         "Use ask_user when intent is ambiguous, explicit input is required, or multiple valid options exist.",
+         "Ask exactly one focused question per ask_user call; do not combine numbered, multipart, or unrelated questions.",
       ],
       // Block other tool calls in the same assistant turn until the user answers,
       // so the model can't batch ask_user with bash/edit/write and let those run
       // (potentially with side effects) before the user sees the prompt.
       executionMode: "sequential",
       parameters: Type.Object({
-         question: Type.String({ description: "The question to ask the user" }),
+         question: Type.String({
+            description: "One focused question in one sentence; target at most 120 characters",
+         }),
          context: Type.Optional(
             Type.String({
-               description: "Relevant context to show before the question (summary of findings)",
+               description: "Optional decision-critical context; omit when options are self-explanatory and target at most 240 characters or three short lines",
             }),
          ),
          options: Type.Optional(
@@ -1852,9 +2079,9 @@ export default function(pi: ExtensionAPI) {
                // and produce empty options. Plain strings are still accepted at
                // runtime for older transcripts. See issue #22.
                Type.Object({
-                  title: Type.String({ description: "Short title for this option" }),
+                  title: Type.String({ description: "Short title for this option; use 2-4 options where practical" }),
                   description: Type.Optional(
-                     Type.String({ description: "Longer description explaining this option" }),
+                     Type.String({ description: "One-line description explaining the option when needed" }),
                   ),
                }),
                { description: "List of options for the user to choose from" },
@@ -1968,7 +2195,13 @@ export default function(pi: ExtensionAPI) {
 
          if (options.length === 0) {
             const prompt = normalizedContext ? `${question}\n\nContext:\n${normalizedContext}` : question;
-            const answer = await ctx.ui.input(prompt, "Type your answer...", timeout ? { timeout } : undefined);
+            pi.events.emit("herdr:blocked", { active: true, label: "Waiting for user response" });
+            let answer: string | undefined;
+            try {
+               answer = await ctx.ui.input(prompt, "Type your answer...", timeout ? { timeout } : undefined);
+            } finally {
+               pi.events.emit("herdr:blocked", { active: false });
+            }
             const response = createFreeformResponse(answer);
 
             if (!response) {
@@ -1994,6 +2227,7 @@ export default function(pi: ExtensionAPI) {
          let overlayHandle: OverlayHandle | undefined;
          let removeOverlayInputListener: (() => void) | undefined;
          let hasAnnouncedHide = false;
+         pi.events.emit("herdr:blocked", { active: true, label: "Waiting for user response" });
          try {
             const customFactory = (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: AskUIResult | null) => void) => {
                if (signal) {
@@ -2066,6 +2300,7 @@ export default function(pi: ExtensionAPI) {
             };
          } finally {
             removeOverlayInputListener?.();
+            pi.events.emit("herdr:blocked", { active: false });
          }
 
          if (result === null) {
