@@ -6,6 +6,9 @@
 > Changes from upstream:
 >
 > - Defaults to `allowComment: true` and `displayMode: "inline"`; per-call parameters and environment variables can still override both.
+> - Integrates [upstream PR #27](https://github.com/edlsh/pi-ask-user/pull/27) to emit lifecycle events while awaiting user input.
+> - Integrates [upstream PR #32](https://github.com/edlsh/pi-ask-user/pull/32) to improve usability on phone-sized terminals.
+> - Integrates [upstream PR #34](https://github.com/edlsh/pi-ask-user/pull/34) to fix multi-select overlay viewport scrolling.
 
 A Pi package that adds an interactive `ask_user` tool for collecting user decisions during an agent run.
 
