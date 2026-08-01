@@ -7,6 +7,10 @@
 - Mobile-first prompt guidance with advisory question, context, and option budgets in the registered tool and bundled skill.
 - Responsive context collapse for overlay and inline prompts; oversized context preserves the full value while keeping the question and choices visible, and `ctrl+e` toggles the expanded view.
 
+### Fixed
+
+- Multi-select overlays now size their variable-height option viewport from the available row budget, keeping focused options and freeform/comment controls visible while navigating and adapting to terminal resizes. Closes #33.
+
 ## [0.13.0](https://github.com/edlsh/pi-ask-user/releases/tag/v0.13.0) - 2026-07-12
 
 ### Added
