@@ -1867,11 +1867,11 @@ export default function(pi: ExtensionAPI) {
             Type.Boolean({ description: "Add a freeform text option. Default: true" }),
          ),
          allowComment: Type.Optional(
-            Type.Boolean({ description: "Collect an optional comment after selecting one or more options. Default: PI_ASK_USER_ALLOW_COMMENT env var if set, otherwise false." }),
+            Type.Boolean({ description: "Collect an optional comment after selecting one or more options. Default: PI_ASK_USER_ALLOW_COMMENT env var if set, otherwise true." }),
          ),
          displayMode: Type.Optional(
             StringEnum(["overlay", "inline"] as const, {
-               description: "UI rendering mode. 'overlay' shows a centered modal, 'inline' renders in-place. Default: PI_ASK_USER_DISPLAY_MODE env var if set, otherwise 'overlay'. Omit to respect the user's configured preference.",
+               description: "UI rendering mode. 'overlay' shows a centered modal, 'inline' renders in-place. Default: PI_ASK_USER_DISPLAY_MODE env var if set, otherwise 'inline'. Omit to respect the user's configured preference.",
             }),
          ),
          overlayToggleKey: Type.Optional(
@@ -1914,10 +1914,10 @@ export default function(pi: ExtensionAPI) {
          const envMode = process.env.PI_ASK_USER_DISPLAY_MODE?.trim().toLowerCase();
          const envDisplayMode: AskDisplayMode | undefined =
             envMode === "overlay" || envMode === "inline" ? envMode : undefined;
-         const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? "overlay";
+         const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? "inline";
          const allowComment = requestedAllowComment
             ?? parseBooleanPreference(process.env.PI_ASK_USER_ALLOW_COMMENT)
-            ?? false;
+            ?? true;
          const shortcuts: ResolvedAskShortcuts = {
             overlayToggle: resolveShortcut(
                overlayToggleKey,

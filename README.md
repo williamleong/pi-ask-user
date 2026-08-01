@@ -1,5 +1,12 @@
 # pi-ask-user
 
+> [!NOTE]
+> This is a personal-use fork of [edlsh/pi-ask-user](https://github.com/edlsh/pi-ask-user).
+>
+> Changes from upstream:
+>
+> - Defaults to `allowComment: true` and `displayMode: "inline"`; per-call parameters and environment variables can still override both.
+
 A Pi package that adds an interactive `ask_user` tool for collecting user decisions during an agent run.
 
 ## Demo
@@ -16,7 +23,7 @@ High-quality video: [ask-user-demo.mp4](./media/ask-user-demo.mp4)
 - Optional freeform responses
 - User-toggleable extra context on structured selections
 - Context display support
-- Configurable display mode: `overlay` (modal, default) or `inline` (rendered directly in the flow)
+- Configurable display mode: `inline` (default, rendered directly in the flow) or `overlay` (centered modal)
 - Runtime overlay toggle: press the configured overlay-toggle key (`alt+o` by default, configurable per call or via env var) while the prompt is open to temporarily hide/show the popup so you can read prior agent output, then press it again to bring it back
 - Pi-TUI-aligned keybinding and editor behavior
 - Custom TUI rendering for tool calls and results
@@ -64,8 +71,8 @@ The registered tool name is:
 | `options` | `{title, description?}[]?` | `[]` | Multiple-choice options. The schema is a flat object shape (no `anyOf`, which some provider proxies strip or reject); plain strings and common alias keys (`label`, `text`, `value`, `name`, `option`) are still accepted at runtime |
 | `allowMultiple` | `boolean?` | `false` | Enable multi-select mode |
 | `allowFreeform` | `boolean?` | `true` | Add a "Type something" freeform option |
-| `allowComment` | `boolean?` | env var or `false` | Expose a user-toggleable extra-context option in the custom UI (`ctrl+g` or the toggle row) and collect an optional comment in fallback dialogs |
-| `displayMode` | `"overlay" \| "inline"?` | env var or `"overlay"` | Controls custom UI rendering: `overlay` shows the centered modal (current behavior), `inline` renders without overlay framing |
+| `allowComment` | `boolean?` | env var or `true` | Expose a user-toggleable extra-context option in the custom UI (`ctrl+g` or the toggle row) and collect an optional comment in fallback dialogs |
+| `displayMode` | `"overlay" \| "inline"?` | env var or `"inline"` | Controls custom UI rendering: `overlay` shows the centered modal, `inline` renders without overlay framing |
 | `overlayToggleKey` | `string?` | env var or `"alt+o"` | Shortcut for hiding/showing the overlay popup (overlay mode only). Pi-TUI key spec, e.g. `"alt+o"`, `"ctrl+shift+h"`. Pass `"off"` to disable. |
 | `commentToggleKey` | `string?` | env var or `"ctrl+g"` | Shortcut for toggling the optional comment/extra-context row when `allowComment: true`. Pass `"off"` to disable. |
 | `timeout` | `number?` | — | Auto-dismiss after N ms and return `null` if the prompt times out |
@@ -91,11 +98,11 @@ The registered tool name is:
 
 ## Personal preferences via environment variables
 
-Configure your defaults globally by setting these in your shell profile (`~/.zshrc`, `~/.bash_profile`, etc.):
+Override the defaults globally by setting these in your shell profile (`~/.zshrc`, `~/.bash_profile`, etc.):
 
 ```bash
-export PI_ASK_USER_DISPLAY_MODE=inline
-export PI_ASK_USER_ALLOW_COMMENT=true
+export PI_ASK_USER_DISPLAY_MODE=overlay
+export PI_ASK_USER_ALLOW_COMMENT=false
 export PI_ASK_USER_OVERLAY_TOGGLE_KEY=alt+h
 export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 ```
@@ -108,9 +115,9 @@ Effective order:
 
 1. Per-call `displayMode` parameter (if provided)
 2. `PI_ASK_USER_DISPLAY_MODE` (if set to `"overlay"` or `"inline"`)
-3. Fallback default: `"overlay"`
+3. Fallback default: `"inline"`
 
-Unrecognised values are silently ignored and fall back to `"overlay"`.
+Unrecognised values are silently ignored and fall back to `"inline"`.
 
 ### Optional comments
 
@@ -118,7 +125,7 @@ Effective order:
 
 1. Per-call `allowComment` parameter (if provided)
 2. `PI_ASK_USER_ALLOW_COMMENT` (`true`, `1`, `yes`, or `on`; corresponding false values are also accepted)
-3. Fallback default: `false`
+3. Fallback default: `true`
 
 ### Shortcuts
 
@@ -142,7 +149,7 @@ While an `ask_user` prompt is open:
 | `esc` | Clear the search filter, exit freeform/comment mode, or cancel the prompt. |
 | `↑` / `↓`, `ctrl+k` / `ctrl+j` | Navigate options. `ctrl+k` / `ctrl+j` (vim-style) work while typing in searchable prompts without disturbing the filter. |
 
-If you prefer never to see the overlay, set `displayMode: "inline"` per call or `PI_ASK_USER_DISPLAY_MODE=inline` globally.
+Inline mode is the default. To show the modal for a specific call, pass `displayMode: "overlay"`; to change the global preference, set `PI_ASK_USER_DISPLAY_MODE=overlay`.
 
 ## Known limitations
 
