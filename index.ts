@@ -380,6 +380,8 @@ const FREEFORM_SENTINEL = "\u270f\ufe0f Type custom response...";
 const COMMENT_TOGGLE_LABEL = "Add extra context after selection";
 const DEFAULT_OVERLAY_TOGGLE_KEY = "alt+o";
 const DEFAULT_COMMENT_TOGGLE_KEY = "ctrl+g";
+const CONTEXT_TOGGLE_KEYS = [Key.ctrl("e"), Key.ctrl("x"), Key.ctrl("y")];
+const INLINE_CONTEXT_MAX_ROWS = 3;
 
 // Vim-style aliases for navigating option lists. ctrl+j/k are safe in the
 // searchable single-select because they don't collide with fuzzy-search input.
@@ -1046,6 +1048,8 @@ class AskComponent extends Container {
    private promptScrollOffset = 0;
    private promptMaxScrollOffset = 0;
    private promptViewportRows = 0;
+   private contextIsCollapsible = false;
+   private contextExpanded = false;
 
    // Static layout components
    private titleText: Text;
@@ -1163,7 +1167,23 @@ class AskComponent extends Container {
          this.ensureSingleSelectList().setMaxVisibleRows(12);
       }
 
-      return this.frameRawLines(super.render(innerWidth), width, innerWidth);
+      return this.renderInlineLayout(width, innerWidth);
+   }
+
+   private renderInlineLayout(width: number, innerWidth: number): string[] {
+      const fullContextLines = this.buildFullContextLines(innerWidth);
+      this.setContextIsCollapsible(fullContextLines.length > INLINE_CONTEXT_MAX_ROWS);
+      if (this.contextExpanded) {
+         return this.renderOverlayLayout(width, innerWidth);
+      }
+      const bodyLines = [
+         ...this.buildPromptLines(innerWidth, fullContextLines),
+         "",
+         ...this.modeContainer.render(innerWidth),
+         "",
+         ...this.helpText.render(innerWidth),
+      ];
+      return this.frameBodyLines(bodyLines, width, innerWidth);
    }
 
    private getOverlayMaxRenderLines(): number {
@@ -1177,8 +1197,22 @@ class AskComponent extends Container {
       if (maxLines === 2) return [this.renderTopBorder(width), this.renderBottomBorder(width)];
 
       const bodyCapacity = Math.max(0, maxLines - 2);
-      const promptLines = this.buildPromptLines(innerWidth);
-      const helpFullLines = this.helpText.render(innerWidth);
+      let helpFullLines = this.helpText.render(innerWidth);
+      const questionLines = this.buildQuestionLines(innerWidth);
+      const fullContextLines = this.buildFullContextLines(innerWidth);
+      const shouldCollapse = this.displayMode === "inline"
+         ? this.contextIsCollapsible
+         : this.mode === "select"
+            ? this.shouldCollapseContextForOverlay(
+               questionLines.length,
+               fullContextLines.length,
+               bodyCapacity,
+               helpFullLines.length,
+            )
+            : this.contextIsCollapsible;
+      this.setContextIsCollapsible(shouldCollapse);
+      helpFullLines = this.helpText.render(innerWidth);
+      const promptLines = this.buildPromptLines(innerWidth, fullContextLines);
       const helpBudget = this.getOverlayHelpBudget(bodyCapacity, helpFullLines.length);
       const contentRows = Math.max(0, bodyCapacity - helpBudget);
 
@@ -1199,9 +1233,10 @@ class AskComponent extends Container {
             modeBudget = Math.max(modeMinRows, modeBudget);
             promptBudget = promptAndModeRows - modeBudget;
 
+            const usefulPromptTarget = this.contextIsCollapsible && !this.contextExpanded ? 3 : 2;
             const usefulPromptRows = Math.min(
                promptLines.length,
-               promptAndModeRows >= modeMinRows + 2 ? 2 : promptMinRows,
+               promptAndModeRows >= modeMinRows + usefulPromptTarget ? usefulPromptTarget : promptMinRows,
             );
             if (promptBudget < usefulPromptRows && modeBudget > modeMinRows) {
                const shiftedRows = Math.min(usefulPromptRows - promptBudget, modeBudget - modeMinRows);
@@ -1236,12 +1271,63 @@ class AskComponent extends Container {
       return this.frameBodyLines(bodyLines.slice(0, bodyCapacity), width, innerWidth);
    }
 
-   private buildPromptLines(width: number): string[] {
+   private buildQuestionLines(width: number): string[] {
+      return this.questionText.render(width);
+   }
+
+   private buildFullContextLines(width: number): string[] {
+      if (!this.contextComponent) return [];
+      return this.contextComponent.render(width);
+   }
+
+   private setContextIsCollapsible(value: boolean): void {
+      if (this.contextIsCollapsible === value) return;
+      this.contextIsCollapsible = value;
+      if (!value) this.contextExpanded = false;
+      this.updateHelpText();
+   }
+
+   private getContextToggleKey(): string {
+      const reserved = new Set(
+         [this.shortcuts.overlayToggle, this.shortcuts.commentToggle]
+            .filter((shortcut) => !shortcut.disabled)
+            .map((shortcut) => shortcut.spec),
+      );
+      return CONTEXT_TOGGLE_KEYS.find((key) => !reserved.has(key)) ?? CONTEXT_TOGGLE_KEYS[0]!;
+   }
+
+   private buildContextDisplayLines(fullContextLines: string[], width: number): string[] {
+      if (fullContextLines.length === 0) return [];
+      if (!this.contextIsCollapsible || this.contextExpanded) return fullContextLines;
+      const label = `Context (${fullContextLines.length} lines) — ${this.getContextToggleKey()} expand`;
+      return [truncateToWidth(this.theme.fg("dim", label), width, "")];
+   }
+
+   private buildPromptLines(width: number, fullContextLines: string[]): string[] {
+      const questionLines = this.buildQuestionLines(width);
+      const contextLines = this.buildContextDisplayLines(fullContextLines, width);
+      const contextSeparator = this.contextIsCollapsible && !this.contextExpanded ? [] : [""];
       return [
-         ...this.titleText.render(width),
-         ...this.questionText.render(width),
-         ...(this.contextComponent ? ["", ...this.contextComponent.render(width)] : []),
+         ...questionLines,
+         ...(contextLines.length > 0 ? [...contextSeparator, ...contextLines] : []),
       ];
+   }
+
+   private shouldCollapseContextForOverlay(
+      questionRows: number,
+      contextRows: number,
+      bodyCapacity: number,
+      helpRows: number,
+   ): boolean {
+      if (contextRows === 0) return false;
+      const helpBudget = this.getOverlayHelpBudget(bodyCapacity, helpRows);
+      const contentRows = Math.max(0, bodyCapacity - helpBudget);
+      const separatorRows = contentRows >= 4 ? 1 : 0;
+      const promptCapacity = Math.max(
+         0,
+         contentRows - separatorRows - this.getMinimumModeRows(),
+      );
+      return questionRows + 1 + contextRows > promptCapacity;
    }
 
    private getOverlayHelpBudget(bodyCapacity: number, renderedHelpRows: number): number {
@@ -1253,7 +1339,7 @@ class AskComponent extends Container {
    private getMinimumModeRows(): number {
       if (this.mode === "freeform") return 5;
       if (this.mode === "comment") return 6;
-      return this.allowMultiple ? 3 : 4;
+      return 3;
    }
 
    private getPreferredModeRows(): number {
@@ -1464,11 +1550,18 @@ class AskComponent extends Container {
       const overlayHint = this.displayMode === "overlay" && !this.shortcuts.overlayToggle.disabled
          ? literalHint(theme, this.shortcuts.overlayToggle.spec, "hide")
          : null;
-      const promptScrollHint = this.displayMode === "overlay"
+      const promptScrollHint = this.displayMode === "overlay" || this.contextExpanded
          ? literalHint(theme, "PgUp/PgDn", "prompt")
          : null;
       const commentHint = this.allowComment && !this.shortcuts.commentToggle.disabled
          ? literalHint(theme, this.shortcuts.commentToggle.spec, "toggle context")
+         : null;
+      const contextHint = this.contextIsCollapsible
+         ? literalHint(
+            theme,
+            this.getContextToggleKey(),
+            this.contextExpanded ? "collapse context" : "expand context",
+         )
          : null;
       if (this.mode === "freeform" || this.mode === "comment") {
          const alternateCancelKeys = this.keybindings
@@ -1487,12 +1580,16 @@ class AskComponent extends Container {
          return;
       }
 
+      const expandedContextHints = this.contextExpanded ? [contextHint, promptScrollHint] : [];
+      const standardContextHints = this.contextExpanded ? [] : [contextHint, promptScrollHint];
+
       if (this.allowMultiple) {
          const hints = [
+            ...expandedContextHints,
             literalHint(theme, "↑↓", "navigate"),
             literalHint(theme, "space", "toggle"),
             commentHint,
-            promptScrollHint,
+            ...standardContextHints,
             overlayHint,
             keybindingHint(theme, this.keybindings, "tui.select.confirm", "submit"),
             keybindingHint(theme, this.keybindings, "tui.select.cancel", "cancel"),
@@ -1505,9 +1602,10 @@ class AskComponent extends Container {
             .getKeys("tui.select.cancel")
             .filter((key) => key !== "escape" && key !== "esc");
          const hints = [
+            ...expandedContextHints,
             literalHint(theme, "type", "filter"),
             commentHint,
-            promptScrollHint,
+            ...standardContextHints,
             keybindingHint(theme, this.keybindings, "tui.editor.deleteCharBackward", "erase"),
             literalHint(theme, "↑↓", "navigate"),
             overlayHint,
@@ -1680,8 +1778,18 @@ class AskComponent extends Container {
       this.tui.requestRender();
    }
 
+   private toggleContext(): boolean {
+      if (this.mode !== "select" || !this.contextIsCollapsible) return false;
+      this.contextExpanded = !this.contextExpanded;
+      this.promptScrollOffset = 0;
+      this.invalidate();
+      this.tui.requestRender();
+      return true;
+   }
+
    private setPromptScrollOffset(nextOffset: number): boolean {
-      if (this.displayMode !== "overlay" || this.promptMaxScrollOffset <= 0) return false;
+      if (this.displayMode !== "overlay" && !this.contextExpanded) return false;
+      if (this.promptMaxScrollOffset <= 0) return false;
       const clamped = Math.max(0, Math.min(Math.floor(nextOffset), this.promptMaxScrollOffset));
       const changed = clamped !== this.promptScrollOffset;
       this.promptScrollOffset = clamped;
@@ -1689,7 +1797,8 @@ class AskComponent extends Container {
    }
 
    private handlePromptScrollInput(data: string): boolean {
-      if (this.displayMode !== "overlay" || this.promptMaxScrollOffset <= 0) return false;
+      if (this.displayMode !== "overlay" && !this.contextExpanded) return false;
+      if (this.promptMaxScrollOffset <= 0) return false;
       // Prompt scrolling is select-mode only: in freeform/comment modes the
       // editor owns PageUp/PageDown (tui.editor.pageUp/pageDown) for paging
       // through long input, so intercepting them here would steal editor keys.
@@ -1723,6 +1832,9 @@ class AskComponent extends Container {
    }
 
    handleInput(data: string): void {
+      if (matchesKey(data, this.getContextToggleKey() as any) && this.toggleContext()) {
+         return;
+      }
       if (this.handlePromptScrollInput(data)) {
          this.tui.requestRender();
          return;
@@ -1824,24 +1936,29 @@ export default function(pi: ExtensionAPI) {
       name: "ask_user",
       label: "Ask User",
       description:
-         "Ask the user a question with optional multiple-choice answers. Use this to gather information interactively. Ask exactly one focused question per call. Before calling, gather context with tools (read/web/ref) and pass a short summary via the context field.",
+         "Ask the user one focused question with optional choices. Keep it mobile-friendly: use a one-sentence question, optional decision-critical context, and concise options.",
       promptSnippet:
-         "Ask the user one focused question with optional multiple-choice answers to gather information interactively",
+         "Ask one concise, mobile-friendly question with optional multiple-choice answers",
       promptGuidelines: [
-         "Before calling ask_user, gather context with tools (read/web/ref) and pass a short summary via the context field.",
-         "Use ask_user when the user's intent is ambiguous, when a decision requires explicit user input, or when multiple valid options exist.",
-         "Ask exactly one focused question per ask_user call.",
-         "Do not combine multiple numbered, multipart, or unrelated questions into one ask_user prompt.",
+         "Before calling ask_user, gather evidence with tools, but include only decision-critical context in the prompt.",
+         "Keep ask_user mobile-friendly: target one question sentence and at most 120 characters; omit context when options are self-explanatory.",
+         "When context is needed, target at most 240 characters or three short lines. Do not restate the question or options in context.",
+         "Use 2-4 options where practical, with short titles and one-line descriptions.",
+         "Do not emit a long preamble immediately before ask_user.",
+         "Use ask_user when intent is ambiguous, explicit input is required, or multiple valid options exist.",
+         "Ask exactly one focused question per ask_user call; do not combine numbered, multipart, or unrelated questions.",
       ],
       // Block other tool calls in the same assistant turn until the user answers,
       // so the model can't batch ask_user with bash/edit/write and let those run
       // (potentially with side effects) before the user sees the prompt.
       executionMode: "sequential",
       parameters: Type.Object({
-         question: Type.String({ description: "The question to ask the user" }),
+         question: Type.String({
+            description: "One focused question in one sentence; target at most 120 characters",
+         }),
          context: Type.Optional(
             Type.String({
-               description: "Relevant context to show before the question (summary of findings)",
+               description: "Optional decision-critical context; omit when options are self-explanatory and target at most 240 characters or three short lines",
             }),
          ),
          options: Type.Optional(
@@ -1852,9 +1969,9 @@ export default function(pi: ExtensionAPI) {
                // and produce empty options. Plain strings are still accepted at
                // runtime for older transcripts. See issue #22.
                Type.Object({
-                  title: Type.String({ description: "Short title for this option" }),
+                  title: Type.String({ description: "Short title for this option; use 2-4 options where practical" }),
                   description: Type.Optional(
-                     Type.String({ description: "Longer description explaining this option" }),
+                     Type.String({ description: "One-line description explaining the option when needed" }),
                   ),
                }),
                { description: "List of options for the user to choose from" },
