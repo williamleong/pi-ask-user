@@ -262,6 +262,93 @@ describe("ask_user", () => {
       expect((tool as any).executionMode).toBe("sequential");
    });
 
+   test("emits Herdr blocked lifecycle while awaiting a structured answer", async () => {
+      const tool = await setupTool();
+
+      await tool.execute(
+         "tool-call-id",
+         { question: "Continue?", options: ["Yes"] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { custom: async () => ({ kind: "selection", selections: ["Yes"] }) } },
+      );
+
+      expect(emittedEvents.filter((event) => event.name === "herdr:blocked")).toEqual([
+         { name: "herdr:blocked", payload: { active: true, label: "Waiting for user response" } },
+         { name: "herdr:blocked", payload: { active: false } },
+      ]);
+   });
+
+   test("emits Herdr blocked lifecycle while awaiting a freeform answer", async () => {
+      const tool = await setupTool();
+
+      await tool.execute(
+         "tool-call-id",
+         { question: "Why?", options: [] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { input: async () => "Because" } },
+      );
+
+      expect(emittedEvents.filter((event) => event.name === "herdr:blocked")).toEqual([
+         { name: "herdr:blocked", payload: { active: true, label: "Waiting for user response" } },
+         { name: "herdr:blocked", payload: { active: false } },
+      ]);
+   });
+
+   test("clears Herdr blocked lifecycle when structured UI rejects", async () => {
+      const tool = await setupTool();
+
+      const result = await tool.execute(
+         "tool-call-id",
+         { question: "Continue?", options: ["Yes"] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { custom: async () => { throw new Error("UI failed"); } } },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(emittedEvents.filter((event) => event.name === "herdr:blocked")).toEqual([
+         { name: "herdr:blocked", payload: { active: true, label: "Waiting for user response" } },
+         { name: "herdr:blocked", payload: { active: false } },
+      ]);
+   });
+
+   test("clears Herdr blocked lifecycle when freeform input is cancelled", async () => {
+      const tool = await setupTool();
+
+      const result = await tool.execute(
+         "tool-call-id",
+         { question: "Why?", options: [] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { input: async () => undefined } },
+      );
+
+      expect(result.details.cancelled).toBe(true);
+      expect(emittedEvents.filter((event) => event.name === "herdr:blocked")).toEqual([
+         { name: "herdr:blocked", payload: { active: true, label: "Waiting for user response" } },
+         { name: "herdr:blocked", payload: { active: false } },
+      ]);
+   });
+
+   test("clears Herdr blocked lifecycle when freeform input rejects", async () => {
+      const tool = await setupTool();
+
+      await expect(tool.execute(
+         "tool-call-id",
+         { question: "Why?", options: [] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { input: async () => { throw new Error("input failed"); } } },
+      )).rejects.toThrow("input failed");
+
+      expect(emittedEvents.filter((event) => event.name === "herdr:blocked")).toEqual([
+         { name: "herdr:blocked", payload: { active: true, label: "Waiting for user response" } },
+         { name: "herdr:blocked", payload: { active: false } },
+      ]);
+   });
+
    test("uses inline mode by default", async () => {
       unsetEnv("PI_ASK_USER_DISPLAY_MODE");
       const tool = await setupTool();
