@@ -2021,7 +2021,19 @@ async function askViaDialogs(
       return createSelectionResponse(selections, comment);
    }
 
-   const optionTitlesByLabel = new Map(options.map((option) => [formatDialogOption(option), option.title]));
+   const usedLabels = new Set<string>(allowFreeform ? [FREEFORM_SENTINEL] : []);
+   const optionTitlesByLabel = new Map<string, string>();
+   for (const option of options) {
+      const baseLabel = formatDialogOption(option);
+      let label = baseLabel;
+      let duplicateNumber = 2;
+      while (usedLabels.has(label)) {
+         label = `${baseLabel} (${duplicateNumber})`;
+         duplicateNumber += 1;
+      }
+      usedLabels.add(label);
+      optionTitlesByLabel.set(label, option.title);
+   }
    const selectOptions = [...optionTitlesByLabel.keys()];
    if (allowFreeform) selectOptions.push(FREEFORM_SENTINEL);
 

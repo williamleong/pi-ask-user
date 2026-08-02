@@ -3287,6 +3287,125 @@ describe("ask_user", () => {
          expect(inputCalls).toBe(0);
       });
 
+      test("single-select preserves colliding structured option labels", async () => {
+         const tool = await setupTool();
+         let selectOptions: string[] = [];
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick a path",
+               options: [
+                  { title: "A — B" },
+                  { title: "A", description: "B" },
+               ],
+               allowFreeform: false,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async (_title: string, options: string[]) => {
+                     selectOptions = options;
+                     return "A — B (2)";
+                  },
+                  input: async () => undefined,
+               },
+            },
+         );
+
+         expect(selectOptions).toEqual(["A — B", "A — B (2)"]);
+         expect(result.details.response).toEqual({ kind: "selection", selections: ["A"] });
+      });
+
+      test("single-select retains separate buttons for duplicate labels", async () => {
+         const tool = await setupTool();
+         let selectOptions: string[] = [];
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick a path",
+               options: [{ title: "Repeat" }, { title: "Repeat" }],
+               allowFreeform: false,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async (_title: string, options: string[]) => {
+                     selectOptions = options;
+                     return "Repeat (2)";
+                  },
+                  input: async () => undefined,
+               },
+            },
+         );
+
+         expect(selectOptions).toEqual(["Repeat", "Repeat (2)"]);
+         expect(result.details.response).toEqual({ kind: "selection", selections: ["Repeat"] });
+      });
+
+      test("single-select maps a source title matching the freeform sentinel", async () => {
+         const tool = await setupTool();
+         const sentinel = "✏️ Type custom response...";
+         let selectOptions: string[] = [];
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick a path",
+               options: [{ title: sentinel }],
+               allowFreeform: true,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async (_title: string, options: string[]) => {
+                     selectOptions = options;
+                     return "✏️ Type custom response... (2)";
+                  },
+                  input: async () => undefined,
+               },
+            },
+         );
+
+         expect(selectOptions).toEqual(["✏️ Type custom response... (2)", sentinel]);
+         expect(result.details.response).toEqual({ kind: "selection", selections: [sentinel] });
+      });
+
+      test("single-select keeps freeform reachable when a source title matches its sentinel", async () => {
+         const tool = await setupTool();
+         const sentinel = "✏️ Type custom response...";
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick a path",
+               options: [{ title: sentinel }],
+               allowFreeform: true,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async () => sentinel,
+                  input: async () => "Custom path",
+               },
+            },
+         );
+
+         expect(result.details.response).toEqual({ kind: "freeform", text: "Custom path" });
+      });
 
       test("returns cancelled when select() returns undefined", async () => {
          const tool = await setupTool();
