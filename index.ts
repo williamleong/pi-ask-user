@@ -159,6 +159,10 @@ function formatOptionsForMessage(options: QuestionOption[]): string {
       .join("\n");
 }
 
+function formatDialogOption(option: QuestionOption): string {
+   return option.description ? `${option.title} — ${option.description}` : option.title;
+}
+
 function normalizeOptionalComment(text: string | null | undefined): string | undefined {
    const trimmed = text?.trim();
    return trimmed ? trimmed : undefined;
@@ -2017,7 +2021,20 @@ async function askViaDialogs(
       return createSelectionResponse(selections, comment);
    }
 
-   const selectOptions = options.map((o) => o.title);
+   const usedLabels = new Set<string>(allowFreeform ? [FREEFORM_SENTINEL] : []);
+   const optionTitlesByLabel = new Map<string, string>();
+   for (const option of options) {
+      const baseLabel = formatDialogOption(option);
+      let label = baseLabel;
+      let duplicateNumber = 2;
+      while (usedLabels.has(label)) {
+         label = `${baseLabel} (${duplicateNumber})`;
+         duplicateNumber += 1;
+      }
+      usedLabels.add(label);
+      optionTitlesByLabel.set(label, option.title);
+   }
+   const selectOptions = [...optionTitlesByLabel.keys()];
    if (allowFreeform) selectOptions.push(FREEFORM_SENTINEL);
 
    const selected = await ui.select(prompt, selectOptions, dialogOpts) as string | undefined;
@@ -2029,16 +2046,9 @@ async function askViaDialogs(
       return createFreeformResponse(answer);
    }
 
-   if (!allowComment) {
-      return createSelectionResponse([selected]);
-   }
-
-   const comment = await ui.input(
-      buildCommentPrompt(prompt, [selected]),
-      "Optional comment (press Enter to skip)...",
-      dialogOpts,
-   ) as string | undefined;
-   return createSelectionResponse([selected], comment);
+   const mappedTitle = optionTitlesByLabel.get(selected);
+   if (!mappedTitle) return null;
+   return createSelectionResponse([mappedTitle]);
 }
 
 export default function(pi: ExtensionAPI) {
