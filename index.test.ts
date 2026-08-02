@@ -3037,14 +3037,14 @@ describe("ask_user", () => {
                   custom: async () => undefined,
                   select: async (_title: string, opts: string[]) => {
                      selectOptions = opts;
-                     return "B";
+                     return "B — why";
                   },
                   input: async () => undefined,
                },
             },
          );
 
-         expect(selectOptions).toEqual(["42", "true", "Real", "A", "B"]);
+         expect(selectOptions).toEqual(["42", "true", "Real", "A", "B — why"]);
          expect(result.details.options).toEqual([
             { title: "42" },
             { title: "true" },
@@ -3181,14 +3181,16 @@ describe("ask_user", () => {
 
       test("selecting freeform sentinel follows up with input()", async () => {
          const tool = await setupTool();
-         let inputCalled = false;
          const sentinel = "\u270f\ufe0f Type custom response...";
 
          const result = await tool.execute(
             "tool-call-id",
             {
-               question: "Pick a color",
-               options: ["Red", "Blue"],
+               question: "Pick a deployment path",
+               options: [
+                  { title: "Red", description: "Stop deployment" },
+                  { title: "Blue", description: "Continue deployment" },
+               ],
                allowFreeform: true,
             },
             undefined,
@@ -3198,17 +3200,13 @@ describe("ask_user", () => {
                ui: {
                   custom: async () => undefined,
                   select: async () => sentinel,
-                  input: async () => {
-                     inputCalled = true;
-                     return "Purple";
-                  },
+                  input: async () => "Blue — use the canary first",
                },
             },
          );
 
          expect(result.isError).not.toBe(true);
-         expect(inputCalled).toBe(true);
-         expect(result.details.response).toEqual({ kind: "freeform", text: "Purple" });
+         expect(result.details.response).toEqual({ kind: "freeform", text: "Blue — use the canary first" });
       });
 
       test("multi-select degrades to input() with options in prompt", async () => {
@@ -3246,16 +3244,21 @@ describe("ask_user", () => {
          expect(inputTitle).toContain("3. Green");
       });
 
-      test("single-select can collect an optional comment after choosing an option", async () => {
+      test("single-select uses descriptive labels without a follow-up comment prompt", async () => {
          const tool = await setupTool();
+         let selectOptions: string[] = [];
          let inputCalls = 0;
 
          const result = await tool.execute(
             "tool-call-id",
             {
-               question: "Pick a color",
-               options: ["Red", "Blue"],
+               question: "Pick a deployment path",
+               options: [
+                  { title: "Red", description: "Stop deployment" },
+                  { title: "Blue", description: "Continue deployment" },
+               ],
                allowComment: true,
+               allowFreeform: true,
             },
             undefined,
             undefined,
@@ -3263,7 +3266,10 @@ describe("ask_user", () => {
                hasUI: true,
                ui: {
                   custom: async () => undefined,
-                  select: async () => "Blue",
+                  select: async (_title: string, options: string[]) => {
+                     selectOptions = options;
+                     return "Blue — Continue deployment";
+                  },
                   input: async () => {
                      inputCalls += 1;
                      return "Keep it aligned with the settings screen.";
@@ -3272,14 +3278,13 @@ describe("ask_user", () => {
             },
          );
 
-         expect(inputCalls).toBe(1);
-         expect(result.isError).not.toBe(true);
-         expect(result.details.response).toEqual({
-            kind: "selection",
-            selections: ["Blue"],
-            comment: "Keep it aligned with the settings screen.",
-         });
-         expect(result.details.cancelled).toBe(false);
+         expect(selectOptions).toEqual([
+            "Red — Stop deployment",
+            "Blue — Continue deployment",
+            "✏️ Type custom response...",
+         ]);
+         expect(result.details.response).toEqual({ kind: "selection", selections: ["Blue"] });
+         expect(inputCalls).toBe(0);
       });
 
 
