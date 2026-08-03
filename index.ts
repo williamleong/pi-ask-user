@@ -1980,14 +1980,19 @@ async function askViaDialogs(
    if (allowMultiple) {
       const optionList = formatOptionsForMessage(options);
       const rawSelections = await ui.input(
-         `${prompt}\n\nOptions (select one or more):\n${optionList}`,
-         "Type your selection(s)...",
+         `${prompt}\n\nOptions (select one or more):\n${optionList}\n\nEnter comma-separated exact option titles, or any custom response.`,
+         "Type option titles or a custom response...",
          dialogOpts,
       ) as string | undefined;
       if (isCancelledInput(rawSelections)) return null;
 
       const selections = parseDialogSelections(rawSelections);
       if (selections.length === 0) return null;
+
+      const optionTitles = new Set(options.map((option) => option.title));
+      if (!selections.every((selection) => optionTitles.has(selection))) {
+         return createFreeformResponse(rawSelections);
+      }
 
       if (!allowComment) {
          return createSelectionResponse(selections);
@@ -2094,7 +2099,7 @@ export default function(pi: ExtensionAPI) {
          commentToggleKey: Type.Optional(
             Type.String({
                description:
-                  "Shortcut for toggling the optional comment/extra-context row when allowComment is true, e.g. 'ctrl+g'. Pass 'off' to disable. Default: PI_ASK_USER_COMMENT_TOGGLE_KEY env var if set, otherwise 'ctrl+g'.",
+                  "Shortcut for toggling the extra-context row, e.g. 'ctrl+g'. Pass 'off' to disable. Default: PI_ASK_USER_COMMENT_TOGGLE_KEY env var if set, otherwise 'ctrl+g'.",
             }),
          ),
          timeout: Type.Optional(
@@ -2320,9 +2325,6 @@ export default function(pi: ExtensionAPI) {
          }
          if (args.allowMultiple) {
             text += theme.fg("dim", " [multi-select]");
-         }
-         if (args.allowComment) {
-            text += theme.fg("dim", " [optional comment]");
          }
          return new Text(text, 0, 0);
       },

@@ -294,10 +294,19 @@ describe("ask_user", () => {
       expect((tool as any).parameters.allowComment).toBeUndefined();
    });
 
-   test("ignores legacy false values and keeps both controls available", async () => {
+   test("describes the comment toggle without a legacy policy condition", async () => {
+      const tool = await setupTool();
+      const description = ((tool as any).parameters.commentToggleKey as any).description;
+
+      expect(description).toContain("extra-context row");
+      expect(description).not.toContain("allowComment");
+   });
+
+   test("ignores legacy false values and accepts selection context", async () => {
       const tool = await setupTool();
       let rendered = "";
-      await tool.execute(
+      editorText = "";
+      const result = await tool.execute(
          "tool-call-id",
          {
             question: "Which option should we use?",
@@ -311,20 +320,46 @@ describe("ask_user", () => {
             hasUI: true,
             ui: {
                custom: async (factory: any) => {
+                  let resolved: unknown;
                   const component = factory(
                      { requestRender() {}, terminal: { rows: 24 } },
                      createTheme(),
                      createKeybindings(),
-                     () => {},
+                     (value: unknown) => { resolved = value; },
                   );
                   rendered = component.render(80).join("\n");
-                  return null;
+                  component.handleInput("ctrl+g");
+                  component.handleInput("enter");
+                  editorText = "Use the audited path.";
+                  component.handleInput("enter");
+                  return resolved ?? null;
                },
             },
          },
       );
       expect(rendered).toContain("Add extra context after selection");
       expect(rendered).toContain("Type something.");
+      expect(result.details.response).toEqual({
+         kind: "selection",
+         selections: ["Alpha"],
+         comment: "Use the audited path.",
+      });
+   });
+
+   test("renders call summaries independently of the legacy comment flag", async () => {
+      const tool = await setupTool();
+      const renderCall = (tool as any).renderCall.bind(tool);
+      const withoutLegacyComment = renderCall(
+         { question: "Which option?", options: ["Alpha"], allowComment: false },
+         createTheme(),
+      ).render().join("\n");
+      const withLegacyComment = renderCall(
+         { question: "Which option?", options: ["Alpha"], allowComment: true },
+         createTheme(),
+      ).render().join("\n");
+
+      expect(withoutLegacyComment).toBe(withLegacyComment);
+      expect(withoutLegacyComment).not.toContain("[optional comment]");
    });
 
    test("documents custom response and extra context controls as always available", async () => {
@@ -1978,13 +2013,14 @@ describe("ask_user", () => {
    test("shows the remapped cancel key in freeform help text", async () => {
       const tool = await setupTool();
       let helpText = "";
+      editorText = "";
 
       const result = await tool.execute(
          "tool-call-id",
          {
             question: "Which option should we use?",
             options: ["Alpha", "Beta"],
-            allowFreeform: true,
+            allowFreeform: false,
             allowComment: false,
             displayMode: "overlay",
          },
@@ -1994,24 +2030,29 @@ describe("ask_user", () => {
             hasUI: true,
             ui: {
                custom: async (factory: any) => {
+                  let resolved: unknown;
                   const component = factory(
                      { requestRender() { }, terminal: { rows: 24 } },
                      createTheme(),
                      createKeybindings({ "tui.select.cancel": ["q"] }),
-                     () => { },
+                     (value: unknown) => { resolved = value; },
                   );
 
                   component.handleInput("down");
                   component.handleInput("down");
+                  component.handleInput("down");
                   component.handleInput("enter");
                   helpText = (component as any).helpText.render().join("\n");
-                  return null;
+                  editorText = "A custom path";
+                  component.handleInput("enter");
+                  return resolved ?? null;
                },
             },
          },
       );
 
       expect(result.isError).not.toBe(true);
+      expect(result.details.response).toEqual({ kind: "freeform", text: "A custom path" });
       expect(helpText).toContain("alt+o hide");
       expect(helpText).toContain("q cancel");
       expect(helpText).not.toContain("ctrl+c cancel");
@@ -3224,6 +3265,42 @@ describe("ask_user", () => {
          expect(selectionPrompt).toContain("2. Blue");
          expect(selectionPrompt).toContain("3. Green");
          expect(inputCalls).toBe(2);
+      });
+
+      test("multi-select returns a custom response for input that is not exact option titles", async () => {
+         const tool = await setupTool();
+         let prompt = "";
+         let inputCalls = 0;
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick a deployment path",
+               options: ["Blue", "Green"],
+               allowMultiple: true,
+               allowFreeform: false,
+               allowComment: false,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async () => undefined,
+                  input: async (title: string) => {
+                     inputCalls += 1;
+                     prompt = title;
+                     return "Use a staged canary rollout";
+                  },
+               },
+            },
+         );
+
+         expect(result.isError).not.toBe(true);
+         expect(result.details.response).toEqual({ kind: "freeform", text: "Use a staged canary rollout" });
+         expect(inputCalls).toBe(1);
+         expect(prompt).toContain("exact option titles");
       });
 
       test("single-select uses descriptive labels without a follow-up comment prompt", async () => {
