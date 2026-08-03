@@ -5,7 +5,7 @@
 >
 > Changes from upstream:
 >
-> - Defaults to `allowComment: true` and `displayMode: "inline"`; per-call parameters and environment variables can still override both.
+> - Option prompts always include custom response and extra context controls; `displayMode` defaults to `"inline"` and remains configurable.
 > - Integrates [upstream PR #27](https://github.com/edlsh/pi-ask-user/pull/27) to emit lifecycle events while awaiting user input.
 > - Integrates [upstream PR #32](https://github.com/edlsh/pi-ask-user/pull/32) to improve usability on phone-sized terminals.
 > - Integrates [upstream PR #34](https://github.com/edlsh/pi-ask-user/pull/34) to fix multi-select overlay viewport scrolling.
@@ -23,8 +23,7 @@ High-quality video: [ask-user-demo.mp4](./media/ask-user-demo.mp4)
 - Searchable single-select option lists with wrapped titles and descriptions
 - Responsive split-pane details preview on wide terminals with single-column fallback on narrow terminals
 - Multi-select option lists
-- Optional freeform responses
-- User-toggleable extra context on structured selections
+- Custom responses and user-toggleable extra context on structured selections are always available
 - Context display support
 - Mobile-first question guidance plus responsive context collapse that keeps the question and choices visible on small terminals without discarding full context
 - Configurable display mode: `inline` (default, rendered directly in the flow) or `overlay` (centered modal)
@@ -74,11 +73,9 @@ The registered tool name is:
 | `context` | `string?` | — | Relevant context summary shown before the question |
 | `options` | `{title, description?}[]?` | `[]` | Multiple-choice options. The schema is a flat object shape (no `anyOf`, which some provider proxies strip or reject); plain strings and common alias keys (`label`, `text`, `value`, `name`, `option`) are still accepted at runtime |
 | `allowMultiple` | `boolean?` | `false` | Enable multi-select mode |
-| `allowFreeform` | `boolean?` | `true` | Add a "Type something" freeform option |
-| `allowComment` | `boolean?` | env var or `true` | Expose a user-toggleable extra-context option in the custom UI (`ctrl+g` or the toggle row) and collect an optional comment in fallback dialogs |
 | `displayMode` | `"overlay" \| "inline"?` | env var or `"inline"` | Controls custom UI rendering: `overlay` shows the centered modal, `inline` renders without overlay framing |
 | `overlayToggleKey` | `string?` | env var or `"alt+o"` | Shortcut for hiding/showing the overlay popup (overlay mode only). Pi-TUI key spec, e.g. `"alt+o"`, `"ctrl+shift+h"`. Pass `"off"` to disable. |
-| `commentToggleKey` | `string?` | env var or `"ctrl+g"` | Shortcut for toggling the optional comment/extra-context row when `allowComment: true`. Pass `"off"` to disable. |
+| `commentToggleKey` | `string?` | env var or `"ctrl+g"` | Shortcut for toggling the extra-context row. Pass `"off"` to disable. |
 | `timeout` | `number?` | — | Auto-dismiss after N ms and return `null` if the prompt times out |
 
 ## Example usage shape
@@ -92,8 +89,6 @@ The registered tool name is:
     { "title": "production", "description": "Customer-facing" }
   ],
   "allowMultiple": false,
-  "allowFreeform": true,
-  "allowComment": true,
   "displayMode": "inline"
 }
 ```
@@ -106,7 +101,6 @@ Override the defaults globally by setting these in your shell profile (`~/.zshrc
 
 ```bash
 export PI_ASK_USER_DISPLAY_MODE=overlay
-export PI_ASK_USER_ALLOW_COMMENT=false
 export PI_ASK_USER_OVERLAY_TOGGLE_KEY=alt+h
 export PI_ASK_USER_COMMENT_TOGGLE_KEY=alt+c
 ```
@@ -123,13 +117,9 @@ Effective order:
 
 Unrecognised values are silently ignored and fall back to `"inline"`.
 
-### Optional comments
+### Always-available input controls
 
-Effective order:
-
-1. Per-call `allowComment` parameter (if provided)
-2. `PI_ASK_USER_ALLOW_COMMENT` (`true`, `1`, `yes`, or `on`; corresponding false values are also accepted)
-3. Fallback default: `true`
+Option prompts always include custom response and extra context controls. Use the "Type something" row to provide a custom response, or use the extra-context row (or `ctrl+g`) after selecting an option to add context.
 
 ### Shortcuts
 
@@ -148,7 +138,7 @@ While an `ask_user` prompt is open:
 | Key | Action |
 |-----|--------|
 | `alt+o` (configurable via `overlayToggleKey`) | Hide/show the overlay popup so you can read the agent's prior output. Available in `overlay` mode only. The first time you hide it, a notification reminds you which key brings it back. |
-| `ctrl+g` (configurable via `commentToggleKey`) | Toggle the optional comment/extra-context row (when `allowComment: true`). |
+| `ctrl+g` (configurable via `commentToggleKey`) | Toggle the extra-context row. |
 | `ctrl+e` | Expand or collapse oversized context while choosing an option. If another configured ask shortcut owns it, the prompt shows `ctrl+x` or `ctrl+y` instead. |
 | `enter` | Confirm the focused option, submit a freeform response, or submit/skip an optional comment. |
 | `esc` | Clear the search filter, exit freeform/comment mode, or cancel the prompt. |

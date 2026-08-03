@@ -49,8 +49,7 @@ Call `ask_user` with one decision at a time:
 - `context`: synthesized summary
 - `options`: 2-5 clear choices when possible
 - `allowMultiple`: `false` unless independent selections are genuinely needed
-- `allowFreeform`: usually `true`
-- `allowComment` *(optional)*: `true` by default, exposing an extra-context toggle after structured selections. Pass `false` only when comments would not be meaningful for the decision.
+- Option prompts always include custom response and extra context controls.
 - `displayMode` *(optional)*: `"inline"` (default) or `"overlay"`. Inline mode keeps preceding context visible; pass `"overlay"` only when a centered modal is preferable. The user may override the default via the `PI_ASK_USER_DISPLAY_MODE` environment variable.
 ### 5) Commit the decision
 After response:
@@ -130,8 +129,7 @@ Good options include a short description when trade-offs are non-obvious.
     { "title": "In-memory cache", "description": "Simpler rollout, weaker horizontal consistency" },
     { "title": "Redis cache", "description": "Better consistency and scalability, more ops overhead" }
   ],
-  "allowMultiple": false,
-  "allowFreeform": true
+  "allowMultiple": false
 }
 ```
 
@@ -147,8 +145,7 @@ Good options include a short description when trade-offs are non-obvious.
     "Input schema validation",
     "Secrets rotation"
   ],
-  "allowMultiple": true,
-  "allowFreeform": true
+  "allowMultiple": true
 }
 ```
 
