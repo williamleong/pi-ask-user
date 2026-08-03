@@ -327,6 +327,18 @@ describe("ask_user", () => {
       expect(rendered).toContain("Type something.");
    });
 
+   test("documents custom response and extra context controls as always available", async () => {
+      const readme = await Bun.file("README.md").text();
+      const skill = await Bun.file("skills/ask-user/SKILL.md").text();
+
+      for (const text of [readme, skill]) {
+         expect(text).toContain("always include custom response and extra context controls");
+         expect(text).not.toContain("allowFreeform");
+         expect(text).not.toContain("allowComment");
+         expect(text).not.toContain("PI_ASK_USER_ALLOW_COMMENT");
+      }
+   });
+
    test("bundled skill carries the same mobile-first budgets", async () => {
       const skill = await Bun.file("skills/ask-user/SKILL.md").text();
       const reference = await Bun.file("skills/ask-user/references/ask-user-skill-extension-spec.md").text();
