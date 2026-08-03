@@ -213,6 +213,7 @@ beforeAll(() => {
 
 type RegisteredTool = {
    description: string;
+   parameters: Record<string, unknown>;
    promptSnippet?: string;
    promptGuidelines?: string[];
    execute: (...args: any[]) => Promise<any>;
@@ -285,6 +286,45 @@ describe("ask_user", () => {
       expect(guidance).toContain("three short lines");
       expect(guidance).toContain("2-4 options");
       expect(guidance).toContain("long preamble");
+   });
+
+   test("does not expose per-call freeform or comment switches", async () => {
+      const tool = await setupTool();
+      expect((tool as any).parameters.allowFreeform).toBeUndefined();
+      expect((tool as any).parameters.allowComment).toBeUndefined();
+   });
+
+   test("ignores legacy false values and keeps both controls available", async () => {
+      const tool = await setupTool();
+      let rendered = "";
+      await tool.execute(
+         "tool-call-id",
+         {
+            question: "Which option should we use?",
+            options: ["Alpha", "Beta"],
+            allowFreeform: false,
+            allowComment: false,
+         },
+         undefined,
+         undefined,
+         {
+            hasUI: true,
+            ui: {
+               custom: async (factory: any) => {
+                  const component = factory(
+                     { requestRender() {}, terminal: { rows: 24 } },
+                     createTheme(),
+                     createKeybindings(),
+                     () => {},
+                  );
+                  rendered = component.render(80).join("\n");
+                  return null;
+               },
+            },
+         },
+      );
+      expect(rendered).toContain("Add extra context after selection");
+      expect(rendered).toContain("Type something.");
    });
 
    test("bundled skill carries the same mobile-first budgets", async () => {
@@ -1121,8 +1161,6 @@ describe("ask_user", () => {
          {
             question: "Which option should we use?",
             options: ["A", "B"],
-            allowFreeform: true,
-            allowComment: false,
          },
          undefined,
          undefined,
@@ -1140,6 +1178,7 @@ describe("ask_user", () => {
                      },
                   );
 
+                  component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("enter");
@@ -1240,8 +1279,6 @@ describe("ask_user", () => {
          {
             question: "Which option should we use?",
             options: ["Alpha", "Beta", "Gamma"],
-            allowFreeform: false,
-            allowComment: false,
          },
          undefined,
          undefined,
@@ -1259,6 +1296,8 @@ describe("ask_user", () => {
                      },
                   );
 
+                  component.handleInput("ctrl+k");
+                  component.handleInput("ctrl+k");
                   component.handleInput("ctrl+k");
                   component.handleInput("enter");
                   return resolved ?? null;
@@ -1474,8 +1513,6 @@ describe("ask_user", () => {
                { title: "Option 5" },
             ],
             allowMultiple: true,
-            allowFreeform: false,
-            allowComment: false,
          },
          undefined,
          undefined,
@@ -1499,17 +1536,18 @@ describe("ask_user", () => {
                   expect(early[1]).toContain("→");
                   expect(early[1]).toContain("Option 2");
                   expect(early.slice(2, 5)).toEqual(["", "", ""]);
-                  expect(early[5]).toBe("  (2/5)");
+                  expect(early[5]).toBe("  (2/7)");
 
                   component.handleInput("down");
                   component.handleInput("down");
                   const late = list.render(18);
                   expect(late).toHaveLength(6);
-                  expect(late.slice(0, 3)).toEqual(["", "", ""]);
-                  expect(late[3]).toContain("→");
-                  expect(late[3]).toContain("Option 4");
-                  expect(late[4]).toContain("Option 5");
-                  expect(late[5]).toBe("  (4/5)");
+                  expect(late.slice(0, 2)).toEqual(["", ""]);
+                  expect(late[2]).toContain("→");
+                  expect(late[2]).toContain("Option 4");
+                  expect(late[3]).toContain("Option 5");
+                  expect(late[4]).toBe("");
+                  expect(late[5]).toBe("  (4/7)");
                   return null;
                },
             },
@@ -1801,8 +1839,7 @@ describe("ask_user", () => {
       expect(result.details.cancelled).toBe(false);
    });
 
-   test("allows extra context by default", async () => {
-      unsetEnv("PI_ASK_USER_ALLOW_COMMENT");
+   test("allows extra context", async () => {
       const tool = await setupTool();
 
       const result = await tool.execute(
@@ -1837,72 +1874,6 @@ describe("ask_user", () => {
          selections: ["Chrome"],
          comment: "Prefer the default browser everywhere.",
       });
-   });
-
-   test("PI_ASK_USER_ALLOW_COMMENT=false overrides the default", async () => {
-      stubEnv("PI_ASK_USER_ALLOW_COMMENT", "false");
-      const tool = await setupTool();
-
-      const result = await tool.execute(
-         "tool-call-id",
-         { question: "Which option should we use?", options: ["Chrome", "Firefox"] },
-         undefined,
-         undefined,
-         {
-            hasUI: true,
-            ui: {
-               custom: async (factory: AskComponentFactory) => {
-                  let resolved: unknown;
-                  const component = factory(
-                     { requestRender() { }, terminal: { rows: 24 } },
-                     createTheme(),
-                     createKeybindings(),
-                     (value) => { resolved = value; },
-                  );
-                  component.handleInput("ctrl+g");
-                  component.handleInput("enter");
-                  expect(resolved).not.toBeUndefined();
-                  return resolved ?? null;
-               },
-            },
-         },
-      );
-
-      expect(result.details.response).toEqual({ kind: "selection", selections: ["Chrome"] });
-   });
-
-   test("call-level allowComment false overrides PI_ASK_USER_ALLOW_COMMENT", async () => {
-      stubEnv("PI_ASK_USER_ALLOW_COMMENT", "true");
-      const tool = await setupTool();
-
-      const result = await tool.execute(
-         "tool-call-id",
-         { question: "Which option should we use?", options: ["Chrome", "Firefox"], allowComment: false },
-         undefined,
-         undefined,
-         {
-            hasUI: true,
-            ui: {
-               custom: async (factory: AskComponentFactory) => {
-                  let resolved: unknown;
-                  const component = factory(
-                     { requestRender() { }, terminal: { rows: 24 } },
-                     createTheme(),
-                     createKeybindings(),
-                     (value) => { resolved = value; },
-                  );
-                  component.handleInput("ctrl+g");
-                  component.handleInput("enter");
-                  // Discriminator: per-call false wins, so ctrl+g is a no-op
-                  // and the first enter resolves the selection immediately.
-                  expect(resolved).not.toBeUndefined();
-                  return resolved ?? null;
-               },
-            },
-         },
-      );
-
-      expect(result.details.response).toEqual({ kind: "selection", selections: ["Chrome"] });
    });
 
    test("treats out-of-range number keys as search input in single-select mode", async () => {
@@ -1952,8 +1923,6 @@ describe("ask_user", () => {
          {
             question: "Which option should we use?",
             options: ["Alpha", "Beta"],
-            allowFreeform: true,
-            allowComment: false,
          },
          undefined,
          undefined,
@@ -1974,6 +1943,7 @@ describe("ask_user", () => {
                   component.handleInput("z");
                   component.handleInput("z");
                   component.handleInput("z");
+                  component.handleInput("down");
                   component.handleInput("enter");
                   editorText = "custom from editor";
                   component.handleInput("enter");
@@ -2080,8 +2050,6 @@ describe("ask_user", () => {
          {
             question: "Which option should we use?",
             options: ["Alpha", "Beta"],
-            allowFreeform: true,
-            allowComment: false,
          },
          undefined,
          undefined,
@@ -2095,6 +2063,7 @@ describe("ask_user", () => {
                      createKeybindings(),
                      () => { },
                   );
+                  component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("down");
                   rendered = ((component as any).singleSelectList as any).render(120).join("\n");
@@ -2302,8 +2271,6 @@ describe("ask_user", () => {
             question: "Which option should we use?",
             context: "Short context that should give way to the editor once freeform mode is active.",
             options: ["Alpha", "Beta"],
-            allowFreeform: true,
-            allowComment: false,
             displayMode: "overlay",
          },
          undefined,
@@ -2318,6 +2285,7 @@ describe("ask_user", () => {
                      createKeybindings(),
                      () => { },
                   );
+                  component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("enter");
@@ -2352,8 +2320,6 @@ describe("ask_user", () => {
             question,
             context: "Long overlay context so the prompt pane has scrollable overflow.",
             options: ["Alpha", "Beta"],
-            allowFreeform: true,
-            allowComment: false,
             displayMode: "overlay",
          },
          undefined,
@@ -2370,7 +2336,8 @@ describe("ask_user", () => {
                   );
                   // Render once so the prompt pane computes a scrollable overflow.
                   component.render(50);
-                  // Enter freeform mode (last option is the freeform sentinel).
+                  // Enter freeform mode after the always-present comment control.
+                  component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("down");
                   component.handleInput("enter");
@@ -2988,7 +2955,6 @@ describe("ask_user", () => {
                   { name: "D" },
                   { option: "E" },
                ],
-               allowFreeform: false,
             },
             undefined,
             undefined,
@@ -3005,7 +2971,7 @@ describe("ask_user", () => {
             },
          );
 
-         expect(selectOptions).toEqual(["A", "B", "C", "D", "E"]);
+         expect(selectOptions).toEqual(["A", "B", "C", "D", "E", "✏️ Type custom response..."]);
          expect(result.details.response).toEqual({ kind: "selection", selections: ["C"] });
          expect(result.details.options.map((option: { title: string }) => option.title)).toEqual(["A", "B", "C", "D", "E"]);
       });
@@ -3027,7 +2993,6 @@ describe("ask_user", () => {
                   { title: "A", description: "  " },
                   { label: "B", description: "why" },
                ],
-               allowFreeform: false,
             },
             undefined,
             undefined,
@@ -3044,7 +3009,7 @@ describe("ask_user", () => {
             },
          );
 
-         expect(selectOptions).toEqual(["42", "true", "Real", "A", "B — why"]);
+         expect(selectOptions).toEqual(["42", "true", "Real", "A", "B — why", "✏️ Type custom response..."]);
          expect(result.details.options).toEqual([
             { title: "42" },
             { title: "true" },
@@ -3121,7 +3086,6 @@ describe("ask_user", () => {
             {
                question: "Pick a color",
                options: ["Red", "Blue"],
-               allowFreeform: false,
             },
             undefined,
             undefined,
@@ -3143,7 +3107,7 @@ describe("ask_user", () => {
          expect(result.details.response).toEqual({ kind: "selection", selections: ["Blue"] });
          expect(result.details.cancelled).toBe(false);
          expect(selectTitle).toContain("Pick a color");
-         expect(selectOptions).toEqual(["Red", "Blue"]);
+         expect(selectOptions).toEqual(["Red", "Blue", "✏️ Type custom response..."]);
       });
 
       test("single-select with freeform appends sentinel option", async () => {
@@ -3211,7 +3175,8 @@ describe("ask_user", () => {
 
       test("multi-select degrades to input() with options in prompt", async () => {
          const tool = await setupTool();
-         let inputTitle = "";
+         let selectionPrompt = "";
+         let inputCalls = 0;
 
          const result = await tool.execute(
             "tool-call-id",
@@ -3219,7 +3184,6 @@ describe("ask_user", () => {
                question: "Pick colors",
                options: ["Red", "Blue", "Green"],
                allowMultiple: true,
-               allowComment: false,
             },
             undefined,
             undefined,
@@ -3229,8 +3193,12 @@ describe("ask_user", () => {
                   custom: async () => undefined,
                   select: async () => undefined,
                   input: async (title: string) => {
-                     inputTitle = title;
-                     return "Red, Green";
+                     inputCalls += 1;
+                     if (inputCalls === 1) {
+                        selectionPrompt = title;
+                        return "Red, Green";
+                     }
+                     return undefined;
                   },
                },
             },
@@ -3239,9 +3207,10 @@ describe("ask_user", () => {
          expect(result.isError).not.toBe(true);
          expect(result.details.response).toEqual({ kind: "selection", selections: ["Red", "Green"] });
          // Prompt should list the options for the user
-         expect(inputTitle).toContain("1. Red");
-         expect(inputTitle).toContain("2. Blue");
-         expect(inputTitle).toContain("3. Green");
+         expect(selectionPrompt).toContain("1. Red");
+         expect(selectionPrompt).toContain("2. Blue");
+         expect(selectionPrompt).toContain("3. Green");
+         expect(inputCalls).toBe(2);
       });
 
       test("single-select uses descriptive labels without a follow-up comment prompt", async () => {
@@ -3299,7 +3268,6 @@ describe("ask_user", () => {
                   { title: "A — B" },
                   { title: "A", description: "B" },
                ],
-               allowFreeform: false,
             },
             undefined,
             undefined,
@@ -3316,7 +3284,7 @@ describe("ask_user", () => {
             },
          );
 
-         expect(selectOptions).toEqual(["A — B", "A — B (2)"]);
+         expect(selectOptions).toEqual(["A — B", "A — B (2)", "✏️ Type custom response..."]);
          expect(result.details.response).toEqual({ kind: "selection", selections: ["A"] });
       });
 
@@ -3329,7 +3297,6 @@ describe("ask_user", () => {
             {
                question: "Pick a path",
                options: [{ title: "Repeat" }, { title: "Repeat" }],
-               allowFreeform: false,
             },
             undefined,
             undefined,
@@ -3346,7 +3313,7 @@ describe("ask_user", () => {
             },
          );
 
-         expect(selectOptions).toEqual(["Repeat", "Repeat (2)"]);
+         expect(selectOptions).toEqual(["Repeat", "Repeat (2)", "✏️ Type custom response..."]);
          expect(result.details.response).toEqual({ kind: "selection", selections: ["Repeat"] });
       });
 

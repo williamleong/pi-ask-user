@@ -97,8 +97,6 @@ interface AskParams {
    context?: string;
    options?: AskOptionInput[];
    allowMultiple?: boolean;
-   allowFreeform?: boolean;
-   allowComment?: boolean;
    displayMode?: AskDisplayMode;
    overlayToggleKey?: string | null;
    commentToggleKey?: string | null;
@@ -166,24 +164,6 @@ function formatDialogOption(option: QuestionOption): string {
 function normalizeOptionalComment(text: string | null | undefined): string | undefined {
    const trimmed = text?.trim();
    return trimmed ? trimmed : undefined;
-}
-
-function parseBooleanPreference(value: string | undefined): boolean | undefined {
-   if (value === undefined) return undefined;
-   switch (value.trim().toLowerCase()) {
-      case "1":
-      case "true":
-      case "yes":
-      case "on":
-         return true;
-      case "0":
-      case "false":
-      case "no":
-      case "off":
-         return false;
-      default:
-         return undefined;
-   }
 }
 
 function createFreeformResponse(text: string | null | undefined): AskResponse | null {
@@ -2100,12 +2080,6 @@ export default function(pi: ExtensionAPI) {
          allowMultiple: Type.Optional(
             Type.Boolean({ description: "Allow selecting multiple options. Default: false" }),
          ),
-         allowFreeform: Type.Optional(
-            Type.Boolean({ description: "Add a freeform text option. Default: true" }),
-         ),
-         allowComment: Type.Optional(
-            Type.Boolean({ description: "Collect an optional comment after selecting one or more options. Default: PI_ASK_USER_ALLOW_COMMENT env var if set, otherwise true." }),
-         ),
          displayMode: Type.Optional(
             StringEnum(["overlay", "inline"] as const, {
                description: "UI rendering mode. 'overlay' shows a centered modal, 'inline' renders in-place. Default: PI_ASK_USER_DISPLAY_MODE env var if set, otherwise 'inline'. Omit to respect the user's configured preference.",
@@ -2141,8 +2115,6 @@ export default function(pi: ExtensionAPI) {
             context,
             options: rawOptions = [],
             allowMultiple = false,
-            allowFreeform = true,
-            allowComment: requestedAllowComment,
             displayMode,
             overlayToggleKey,
             commentToggleKey,
@@ -2152,9 +2124,8 @@ export default function(pi: ExtensionAPI) {
          const envDisplayMode: AskDisplayMode | undefined =
             envMode === "overlay" || envMode === "inline" ? envMode : undefined;
          const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? "inline";
-         const allowComment = requestedAllowComment
-            ?? parseBooleanPreference(process.env.PI_ASK_USER_ALLOW_COMMENT)
-            ?? true;
+         const allowFreeform = true;
+         const allowComment = true;
          const shortcuts: ResolvedAskShortcuts = {
             overlayToggle: resolveShortcut(
                overlayToggleKey,
