@@ -38,6 +38,8 @@ Use this protocol whenever the trigger matrix says to ask.
 5. **Commit and proceed**
    - restate chosen option and implement accordingly
 
+Option prompts always include custom response and extra context controls.
+
 ### Mobile-first prompt budget
 
 When calling `ask_user`:
@@ -74,8 +76,7 @@ These are generation targets, not reasons to withhold a necessary decision or re
     { "title": "Path A (ship fast)", "description": "Lowest scope, revisit architecture later" },
     { "title": "Path B (extensible)", "description": "Higher initial effort, cleaner long-term composition" }
   ],
-  "allowMultiple": false,
-  "allowFreeform": true
+  "allowMultiple": false
 }
 ```
 
@@ -102,7 +103,6 @@ Guidance:
     "UI redesign first",
     "Do a minimal pass on both"
   ],
-  "allowMultiple": false,
-  "allowFreeform": true
+  "allowMultiple": false
 }
 ```
